@@ -3,6 +3,10 @@ import type {
   AppSummary,
   Deployment,
   Manifest,
+  PlatformAppDetail,
+  PlatformOverview,
+  ReadModelInfo,
+  ReadModelResult,
 } from "@vibe/shared";
 import { loadCredentials } from "./config.js";
 
@@ -117,4 +121,20 @@ export const api = {
       "DELETE",
       `/api/apps/${id}?confirm=${encodeURIComponent(id)}`
     ),
+
+  /* ---- platform query layer (what LLMs use to reason about the platform) ---- */
+
+  platformOverview: () =>
+    call<PlatformOverview>("GET", "/api/platform/overview"),
+
+  platformApp: (id: string) =>
+    call<PlatformAppDetail>("GET", `/api/platform/apps/${id}`),
+
+  listReadModels: (id: string) =>
+    call<{ models: ReadModelInfo[] }>("GET", `/api/platform/apps/${id}/models`),
+
+  runReadModel: (id: string, model: string, params: Record<string, unknown>) =>
+    call<ReadModelResult>("POST", `/api/platform/apps/${id}/query`, {
+      body: { model, params },
+    }),
 };

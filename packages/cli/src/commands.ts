@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { promisify } from "node:util";
-import { parseManifest, type Manifest } from "@vibe/shared";
+import { parseManifest, validateReadModel, type Manifest } from "@vibe/shared";
 import { api, ApiError } from "./client.js";
 import { hasCredentials, saveCredentials } from "./config.js";
 import { detect } from "./detect.js";
@@ -316,6 +316,22 @@ export async function cmdDoctor(): Promise<void> {
     if (m.capabilities.database && !m.database?.migrations)
       issues.push("database enabled but no migrations command set (database.migrations)");
 
+    // Read-models: the platform/LLM can only answer questions about this app's
+    // live data through declared read-models. Every app with a database should
+    // ship them, and each one must be a valid read-only query.
+    if (m.capabilities.database) {
+      if (!m.readModels.length) {
+        issues.push(
+          "database enabled but no readModels declared — the platform/LLM can't answer " +
+            "questions about this app's live data. Add readModels to vibe.app.yaml (see AGENTS.md)"
+        );
+      } else {
+        const problems = m.readModels.flatMap(validateReadModel);
+        if (problems.length) for (const p of problems) issues.push(`read-model ${p}`);
+        else oks.push(`${m.readModels.length} read-model(s) declared and valid`);
+      }
+    }
+
     // Build path: a custom-dockerfile app must actually ship a Dockerfile, or
     // the deploy fails with "Dockerfile not found".
     if (m.runtime.adapter === "custom-dockerfile") {
@@ -492,6 +508,107 @@ const RULES = [
   "Do not edit proxy/Caddy config; use the vibe CLI for infrastructure.",
   "Update .vibe-memory after meaningful changes.",
 ];
+
+/* ------------------------------ platform ------------------------------ */
+
+/** Read-only view of the whole platform — what an LLM uses to reason about it. */
+export async function cmdPlatform(json: boolean): Promise<void> {
+  const overview = await api.platformOverview();
+  if (json) return log(JSON.stringify(overview, null, 2));
+
+  const { totals, apps } = overview;
+  log(`Apps: ${totals.apps}   Live: ${totals.live}   Unhealthy: ${totals.unhealthy}\n`);
+  if (!apps.length) return log("No apps you can see yet.");
+  for (const a of apps) {
+    const data = a.database ? `${a.readModels} read-model(s)` : "no db";
+    log(
+      `${a.name.padEnd(24)} ${a.status.padEnd(10)} ${a.health.padEnd(10)} ` +
+        `${String(a.members).padStart(2)} member(s)  ${data}`
+    );
+  }
+  log("\nInspect one app: `vibe platform app <id>`  ·  query its data: `vibe query <model> --app <id>`");
+}
+
+/** Detailed, secret-free view of a single app. */
+export async function cmdPlatformApp(id: string, json: boolean): Promise<void> {
+  const d = await api.platformApp(id);
+  if (json) return log(JSON.stringify(d, null, 2));
+  log(`App: ${d.app.name} (${d.app.id})`);
+  log(`Status: ${d.app.status}   Health: ${d.app.health}   ${d.app.url ?? ""}`);
+  log(`Purpose: ${d.description || "(none set)"}`);
+  log(`Access: ${d.access.visibility} · ${d.access.mode} (default ${d.access.defaultRole})`);
+  log(
+    `Database: ${d.database.enabled ? (d.database.provisioned ? "provisioned" : "enabled") : "off"}` +
+      `   Storage: ${d.storage.enabled ? (d.storage.provisioned ? "provisioned" : "enabled") : "off"}`
+  );
+  log(`\nMembers (${d.members.length}):`);
+  for (const m of d.members) log(`  ${m.email}  ${m.role}  ${m.status}`);
+  const secretKeys = Object.keys(d.secrets);
+  log(`\nSecrets present (names only): ${secretKeys.join(", ") || "none"}`);
+  log(`\nRead-models (${d.readModels.length}):`);
+  for (const rm of d.readModels) {
+    const ps = rm.params.map((p) => `${p.name}:${p.type}${p.required ? "*" : ""}`).join(", ");
+    log(`  ${rm.name}(${ps}) — ${rm.description || "(no description)"}`);
+  }
+}
+
+/* ------------------------------- query -------------------------------- */
+
+/** Parse repeated `-p key=value` flags into a params object. */
+function parseParams(pairs: string[] = []): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const pair of pairs) {
+    const eq = pair.indexOf("=");
+    if (eq === -1) throw new Error(`bad --param "${pair}" (expected key=value)`);
+    out[pair.slice(0, eq)] = pair.slice(eq + 1);
+  }
+  return out;
+}
+
+/**
+ * Run a declared read-model against an app's live data, or list available
+ * read-models when no model is given. Defaults to the app in the current
+ * directory; `--app` targets any app you can see.
+ */
+export async function cmdQuery(
+  model: string | undefined,
+  opts: { app?: string; param?: string[]; json?: boolean }
+): Promise<void> {
+  const appId = opts.app ?? (await loadManifest(cwd())).id;
+
+  if (!model) {
+    const { models } = await api.listReadModels(appId);
+    if (opts.json) return log(JSON.stringify(models, null, 2));
+    if (!models.length) return log(`No read-models declared for ${appId}.`);
+    log(`Read-models for ${appId}:`);
+    for (const rm of models) {
+      const ps = rm.params.map((p) => `${p.name}:${p.type}${p.required ? "*" : ""}`).join(", ");
+      log(`  ${rm.name}(${ps}) — ${rm.description || "(no description)"}`);
+    }
+    log("\nRun one: `vibe query <model> -p key=value`");
+    return;
+  }
+
+  const params = parseParams(opts.param);
+  const result = await api.runReadModel(appId, model, params);
+  if (opts.json) return log(JSON.stringify(result, null, 2));
+
+  if (!result.rows.length) {
+    log(`(no rows)${result.truncated ? " — truncated" : ""}`);
+    return;
+  }
+  // Compact table for human eyes; agents should prefer --json.
+  const cols = result.columns;
+  const widths = cols.map((c) =>
+    Math.max(c.length, ...result.rows.map((r) => String(r[c] ?? "").length))
+  );
+  log(cols.map((c, i) => c.padEnd(widths[i] ?? 0)).join("  "));
+  log(widths.map((w) => "-".repeat(w)).join("  "));
+  for (const row of result.rows) {
+    log(cols.map((c, i) => String(row[c] ?? "").padEnd(widths[i] ?? 0)).join("  "));
+  }
+  log(`\n${result.rowCount} row(s)${result.truncated ? " (truncated)" : ""}`);
+}
 
 /* ------------------------------- invite ------------------------------- */
 

@@ -66,6 +66,38 @@ export const AccessSchema = z.object({
   ownerRole: z.string().default("owner"),
 });
 
+/**
+ * Read-models — the app author's declaration of *how the platform/LLM may query
+ * this app's live data*. Each is a single read-only SELECT over the app's own
+ * database with named, typed parameters. The platform runs them inside a
+ * read-only transaction so they can never mutate data. This is what lets an LLM
+ * answer questions like "did I buy tomato sauce last month?" without the app
+ * exposing its raw schema. Every app with a database should declare these.
+ */
+export const ReadModelParamSchema = z.object({
+  name: z
+    .string()
+    .regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, "param name must be alphanumeric/underscore"),
+  type: z.enum(["string", "number", "boolean", "date"]).default("string"),
+  description: z.string().default(""),
+  required: z.boolean().default(false),
+});
+export type ReadModelParam = z.infer<typeof ReadModelParamSchema>;
+
+export const ReadModelSchema = z.object({
+  name: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9_-]*$/, "read-model name must be lowercase alphanumeric/_/-"),
+  description: z.string().default(""),
+  /**
+   * A single read-only SELECT (or WITH … SELECT) over the app's own database.
+   * Use positional placeholders $1, $2, … in the same order as `params`.
+   */
+  sql: z.string().min(1),
+  params: z.array(ReadModelParamSchema).default([]),
+});
+export type ReadModel = z.infer<typeof ReadModelSchema>;
+
 export const ManifestSchema = z.object({
   id: z
     .string()
@@ -82,6 +114,8 @@ export const ManifestSchema = z.object({
   email: EmailSchema.optional(),
   domain: DomainSchema,
   roles: z.array(z.string()).default(["owner", "member"]),
+  /** How the platform/LLM may query this app's live data (see ReadModelSchema). */
+  readModels: z.array(ReadModelSchema).default([]),
 });
 
 export type Manifest = z.infer<typeof ManifestSchema>;

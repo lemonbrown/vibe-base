@@ -107,3 +107,75 @@ export const SecretPresenceSchema = z.record(
   })
 );
 export type SecretPresence = z.infer<typeof SecretPresenceSchema>;
+
+/* ---------------------- API: platform query layer --------------------- */
+/**
+ * The read-only surface an LLM uses to reason about the live platform. Every
+ * response here is deliberately projected to be secret-free — it carries the
+ * *presence* and *shape* of things (which apps, which secrets exist, which
+ * read-models), never credential values. See spec §23.1.
+ */
+
+/** One app's line in the platform overview. */
+export interface PlatformAppLine {
+  id: string;
+  name: string;
+  status: string;
+  health: Health;
+  url: string | null;
+  visibility: string;
+  lastDeployedAt: string | null;
+  members: number;
+  readModels: number;
+  database: boolean;
+  storage: boolean;
+}
+
+export interface PlatformOverview {
+  generatedAt: string;
+  totals: { apps: number; live: number; unhealthy: number };
+  apps: PlatformAppLine[];
+}
+
+/** Describes a queryable read-model to the LLM (no SQL leaked). */
+export interface ReadModelInfo {
+  name: string;
+  description: string;
+  params: Array<{
+    name: string;
+    type: string;
+    description: string;
+    required: boolean;
+  }>;
+}
+
+export interface PlatformAppDetail {
+  app: AppSummary;
+  description: string;
+  manifestSummary: {
+    runtimeAdapter: string;
+    port: number;
+    healthPath: string;
+    capabilities: Record<string, boolean>;
+  };
+  access: { mode: string; defaultRole: string; visibility: string; roles: string[] };
+  database: { enabled: boolean; provisioned: boolean };
+  storage: { enabled: boolean; provisioned: boolean };
+  members: Array<{ email: string; role: string; status: string }>;
+  recentDeployments: Deployment[];
+  repo: { repoFullName: string; defaultBranch: string; htmlUrl: string | null } | null;
+  /** Which secrets exist for this app — names only, never values. */
+  secrets: SecretPresence;
+  readModels: ReadModelInfo[];
+}
+
+/** The result of running a read-model. */
+export interface ReadModelResult {
+  app: string;
+  model: string;
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  rowCount: number;
+  /** True when the result was capped at the row limit. */
+  truncated: boolean;
+}

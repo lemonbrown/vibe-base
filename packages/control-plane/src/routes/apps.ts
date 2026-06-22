@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { RegisterAppRequestSchema } from "@vibe/shared";
+import { RegisterAppRequestSchema, validateReadModel } from "@vibe/shared";
 import { query } from "../db.js";
 import { audit } from "../lib/audit.js";
 import { appSummary, getApp, listApps } from "../repo.js";
@@ -17,6 +17,13 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
     const m = parsed.data.manifest;
+
+    // Read-models become an executable surface, so reject malformed ones at the
+    // door rather than storing SQL that would only fail (or worse) at query time.
+    const modelProblems = m.readModels.flatMap(validateReadModel);
+    if (modelProblems.length) {
+      return reply.code(400).send({ error: `invalid read-models: ${modelProblems.join("; ")}` });
+    }
 
     const existing = await getApp(m.id);
     if (

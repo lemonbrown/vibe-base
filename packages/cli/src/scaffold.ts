@@ -52,6 +52,36 @@ Rules:
   package: \`resend\`, \`googleapis\`, or \`nodemailer\` (check \`EMAIL_PROVIDER\`).
 - Expose a health endpoint at the path in \`vibe.app.yaml\` (runtime.healthPath).
 - Keep \`.vibe-memory/\` up to date after meaningful changes.
+
+Live data / read-models (REQUIRED when this app has a database):
+- The platform lets the user (and LLMs) ask questions about this app's **live
+  data** — e.g. "did I buy tomato sauce last month?" — *only* through
+  **read-models** you declare in \`vibe.app.yaml\` under \`readModels\`. If you don't
+  declare them, that data is invisible to the platform. Treat declaring them as
+  part of building any feature that stores data.
+- Each read-model is a single **read-only** \`SELECT\` (or \`WITH … SELECT\`) over
+  this app's own database, with named, typed params bound as \`$1, $2, …\` in the
+  order listed. The platform runs them in a READ ONLY transaction, so they can
+  never modify data. Example:
+  \`\`\`yaml
+  readModels:
+    - name: purchases_by_item
+      description: Purchases of an item within a date range.
+      sql: >
+        SELECT purchased_at, item, quantity, amount
+        FROM purchases
+        WHERE item ILIKE '%' || $1 || '%'
+          AND purchased_at >= $2 AND purchased_at < $3
+        ORDER BY purchased_at DESC
+      params:
+        - { name: item, type: string, required: true }
+        - { name: from, type: date, required: true }
+        - { name: to,   type: date, required: true }
+  \`\`\`
+- Add or update a read-model whenever you add or change a table the user might
+  ask about. Write clear \`description\`s — that's what the LLM reads to pick one.
+- Verify with \`vibe doctor\` (it flags a database app with no/invalid read-models)
+  and try them with \`vibe query <name> -p key=value\`.
 - A \`.gitignore\` is scaffolded for you. **Never commit \`.env\` or secrets**, and
   keep \`node_modules/\` out of git; if it's missing, create one before committing.
 

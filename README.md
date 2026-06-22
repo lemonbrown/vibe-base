@@ -90,6 +90,38 @@ and send as `EMAIL_FROM`.
 Deferred (post-MVP, per the spec): backups/restore, app actions + MCP server,
 scheduled jobs, custom domains, memory-staleness enforcement.
 
+## Querying the live platform (for LLMs)
+
+A read-only query layer lets you — and an LLM acting on your behalf — *reason
+about the running platform*, not just the code. Everything here is deliberately
+secret-free: it exposes the **presence and shape** of things (which apps exist,
+which secrets are set, which data is queryable), never credential values.
+
+- **Stratum 1 — platform metadata.** Apps, health, deploy history, members, and
+  audit trail, scoped to what you can see (owner sees all; a member sees only
+  their apps):
+  ```bash
+  vibe platform              # overview of every app you can see
+  vibe platform app <id>     # one app: status, members, secret names, read-models
+  ```
+- **Stratum 2 — app data via read-models.** Each app declares **read-models** in
+  `vibe.app.yaml`: named, typed, single read-only `SELECT`s over its own
+  database. The control plane runs them inside a `READ ONLY` transaction (with a
+  statement timeout and row cap), so a query can never mutate data. This is what
+  answers *"did I buy tomato sauce last month?"* without exposing the app's raw
+  schema:
+  ```bash
+  vibe query                              # list this app's read-models
+  vibe query purchases_by_item \
+    -p item=tomato -p from=2026-05-01 -p to=2026-06-01
+  ```
+
+Apps with a database are expected to declare read-models for anything a user
+might ask about; the scaffolded `AGENTS.md` instructs coding agents to do this,
+and `vibe doctor` flags a database app with missing or invalid read-models. The
+same surface is also served over HTTP under `/api/platform/*` behind the gateway
+session/role model, ready for a portal assistant or remote relay to consume.
+
 ## Architecture
 
 ```

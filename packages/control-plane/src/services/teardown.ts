@@ -4,6 +4,7 @@ import { getApp } from "../repo.js";
 import { removeAppRoute } from "./caddy.js";
 import { deprovisionDatabase } from "./dbProvision.js";
 import { removeContainer, removeImage } from "./docker.js";
+import { closeAppPool } from "./query.js";
 import { deprovisionStorage } from "./storage.js";
 
 /**
@@ -48,7 +49,10 @@ export async function destroyApp(
   for (const name of containers) await removeContainer(name);
   for (const ref of images) await removeImage(ref);
 
-  // 3 + 4. Drop the dedicated database/role and the storage bucket.
+  // 3 + 4. Drop the dedicated database/role and the storage bucket. Close any
+  //         cached read-model connection pool first so we aren't holding open
+  //         sessions against the database we're about to drop.
+  await closeAppPool(appId);
   await deprovisionDatabase(appId);
   await deprovisionStorage(appId);
 

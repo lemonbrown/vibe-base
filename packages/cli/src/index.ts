@@ -13,6 +13,9 @@ import {
   cmdLogin,
   cmdLogs,
   cmdOpen,
+  cmdPlatform,
+  cmdPlatformApp,
+  cmdQuery,
   cmdShip,
   cmdRollback,
   cmdStatus,
@@ -104,6 +107,32 @@ deploy
   .command("rollback")
   .description("Roll back to the previous deployment")
   .action(wrap(cmdRollback));
+
+const platform = program
+  .command("platform")
+  .description("Read-only view of the live platform (for you and LLMs)")
+  .option("--json", "output JSON")
+  .action(wrap((opts: { json?: boolean }) => cmdPlatform(!!opts.json)));
+platform
+  .command("app <id>")
+  .description("Detailed, secret-free view of a single app")
+  .option("--json", "output JSON")
+  .action(wrap((id: string, opts: { json?: boolean }) => cmdPlatformApp(id, !!opts.json)));
+
+program
+  .command("query [model]")
+  .description("Run a declared read-model against an app's live data (omit model to list)")
+  .option("--app <id>", "target app id (defaults to the app in this directory)")
+  .option("-p, --param <key=value>", "query parameter (repeatable)", (v: string, acc: string[]) => {
+    acc.push(v);
+    return acc;
+  }, [] as string[])
+  .option("--json", "output JSON")
+  .action(
+    wrap((model: string | undefined, opts: { app?: string; param?: string[]; json?: boolean }) =>
+      cmdQuery(model, opts)
+    )
+  );
 
 const github = program.command("github").description("GitHub integration");
 github
