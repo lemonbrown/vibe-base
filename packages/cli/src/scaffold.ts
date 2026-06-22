@@ -43,14 +43,13 @@ Rules:
 - Read config from environment variables. Never hardcode secrets.
 - Use \`DATABASE_URL\` for Postgres and the \`S3_*\` vars for storage — only when
   that capability is enabled. Never wire up your own provider for these.
-- For email (when \`capabilities.email\` is on), branch on \`EMAIL_PROVIDER\` and
-  send as \`EMAIL_FROM\`; do not configure your own email service:
-  - \`resend\`: POST to the Resend API (or the \`resend\` package) with
-    \`RESEND_API_KEY\`. Simplest; HTTPS only.
-  - \`gmail-api\`: use the \`googleapis\` package with \`GMAIL_CLIENT_ID\`,
-    \`GMAIL_CLIENT_SECRET\`, \`GMAIL_REFRESH_TOKEN\` (OAuth2) to call the Gmail API.
-  - \`smtp\`: use \`nodemailer\` with \`SMTP_HOST/PORT/USER/PASS/SECURE\`.
-  All three are HTTPS-friendly except \`smtp\`, which needs mail ports open.
+- For email (when \`capabilities.email\` is on), **use the scaffolded helper**
+  \`lib/email.js\` — \`const { sendEmail } = require('./lib/email');\` then
+  \`await sendEmail({ to, subject, text })\`. It reads \`EMAIL_PROVIDER\`/\`EMAIL_FROM\`
+  and the right credentials, and handles each provider's error contract (e.g.
+  Resend returns errors instead of throwing). Do not configure your own email
+  service or hand-roll the provider logic. Install only the active provider's
+  package: \`resend\`, \`googleapis\`, or \`nodemailer\` (check \`EMAIL_PROVIDER\`).
 - Expose a health endpoint at the path in \`vibe.app.yaml\` (runtime.healthPath).
 - Keep \`.vibe-memory/\` up to date after meaningful changes.
 - A \`.gitignore\` is scaffolded for you. **Never commit \`.env\` or secrets**, and
@@ -158,6 +157,79 @@ export interface ScaffoldResult {
   created: string[];
 }
 
+/**
+ * Ready-made email helper scaffolded for Node apps with capabilities.email.
+ * Handles all three platform providers and — importantly — checks Resend's
+ * { error } return value (the SDK resolves instead of throwing on failure, a
+ * common silent-failure trap). Each provider's package is required lazily, so
+ * only the active one (resend / googleapis / nodemailer) needs installing.
+ */
+const EMAIL_HELPER_JS = `// Vibe Base email helper — send via the platform-configured provider.
+// Reads EMAIL_PROVIDER + credentials from the environment (injected by Vibe
+// Base when capabilities.email is enabled). Install only the active provider's
+// package: \`resend\`, \`googleapis\`, or \`nodemailer\`.
+
+async function sendEmail({ to, subject, text, html }) {
+  const provider = process.env.EMAIL_PROVIDER;
+  const from = process.env.EMAIL_FROM;
+  if (!provider) throw new Error('Email is not configured (no EMAIL_PROVIDER).');
+  if (!to) throw new Error('sendEmail: "to" is required.');
+
+  if (provider === 'resend') {
+    const { Resend } = require('resend');
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    // Resend returns errors instead of throwing — check explicitly.
+    const { data, error } = await resend.emails.send({ from, to, subject, text, html });
+    if (error) throw new Error('Resend: ' + (error.message || JSON.stringify(error)));
+    return { id: data && data.id };
+  }
+
+  if (provider === 'gmail-api') {
+    const { google } = require('googleapis');
+    const oauth2 = new google.auth.OAuth2(
+      process.env.GMAIL_CLIENT_ID,
+      process.env.GMAIL_CLIENT_SECRET
+    );
+    oauth2.setCredentials({ refresh_token: process.env.GMAIL_REFRESH_TOKEN });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2 });
+    const headers = ['From: ' + from, 'To: ' + to, 'Subject: ' + (subject || '')];
+    if (html) headers.push('Content-Type: text/html; charset=UTF-8');
+    const raw = Buffer.from(headers.join('\\r\\n') + '\\r\\n\\r\\n' + (html || text || ''))
+      .toString('base64url');
+    const r = await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
+    return { id: r.data.id };
+  }
+
+  if (provider === 'smtp') {
+    const nodemailer = require('nodemailer');
+    const t = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT) || 587,
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+    });
+    const info = await t.sendMail({ from, to, subject, text, html });
+    return { id: info.messageId };
+  }
+
+  throw new Error('Unknown EMAIL_PROVIDER: ' + provider);
+}
+
+module.exports = { sendEmail };
+`;
+
+/** Whether the app is a Node project (so a JS email helper makes sense). */
+function isNodeApp(m: Manifest): boolean {
+  const lang = (m.runtime.language ?? "").toLowerCase();
+  return (
+    m.runtime.adapter.startsWith("node-") ||
+    lang === "javascript" ||
+    lang === "typescript"
+  );
+}
+
 export async function scaffold(cwd: string, m: Manifest): Promise<ScaffoldResult> {
   const created: string[] = [];
   const memDir = join(cwd, ".vibe-memory");
@@ -176,6 +248,15 @@ export async function scaffold(cwd: string, m: Manifest): Promise<ScaffoldResult
   ];
   for (const [p, content] of writes) {
     if (await writeIfMissing(p, content)) created.push(p);
+  }
+
+  // A correct, ready-to-use email helper for Node apps that send mail.
+  if (m.capabilities.email && isNodeApp(m)) {
+    const libDir = join(cwd, "lib");
+    await mkdir(libDir, { recursive: true });
+    if (await writeIfMissing(join(libDir, "email.js"), EMAIL_HELPER_JS)) {
+      created.push(join(libDir, "email.js"));
+    }
   }
 
   // Derived files: always regenerate.
