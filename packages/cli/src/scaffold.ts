@@ -37,6 +37,8 @@ Rules:
 - Use \`DATABASE_URL\` for Postgres and the \`S3_*\` vars for storage (only if enabled).
 - Expose a health endpoint at the path in \`vibe.app.yaml\` (runtime.healthPath).
 - Keep \`.vibe-memory/\` up to date after meaningful changes.
+- A \`.gitignore\` is scaffolded for you. **Never commit \`.env\` or secrets**, and
+  keep \`node_modules/\` out of git; if it's missing, create one before committing.
 
 Deploying (GitHub is the default path):
 - **Credentials:** if any \`vibe\` command reports you are not logged in, stop and
@@ -147,6 +149,7 @@ export async function scaffold(cwd: string, m: Manifest): Promise<ScaffoldResult
     [join(memDir, "runtime.md"), runtimeMd(m)],
     [join(memDir, "runbook.md"), RUNBOOK_MD],
     [join(cwd, ".dockerignore"), DOCKERIGNORE],
+    [join(cwd, ".gitignore"), GITIGNORE],
   ];
   for (const [p, content] of writes) {
     if (await writeIfMissing(p, content)) created.push(p);
@@ -227,6 +230,10 @@ export async function scaffoldGithub(
   if (await writeIfMissing(join(wfDir, "deploy.yml"), DEPLOY_WORKFLOW)) {
     created.push(join(wfDir, "deploy.yml"));
   }
+  // Critical before `git add -A`: keep node_modules and .env out of the repo.
+  if (await writeIfMissing(join(cwd, ".gitignore"), GITIGNORE)) {
+    created.push(join(cwd, ".gitignore"));
+  }
   if (m.runtime.adapter !== "custom-dockerfile") {
     if (await writeIfMissing(join(cwd, "Dockerfile"), generateDockerfile(m))) {
       created.push(join(cwd, "Dockerfile"));
@@ -252,4 +259,23 @@ dist
 .env.local
 *.log
 .vibe/state.json
+`;
+
+const GITIGNORE = `# Dependencies / build output
+node_modules/
+dist/
+.next/
+build/
+*.log
+
+# Secrets — never commit these
+.env
+.env.local
+.env.*.local
+
+# Vibe Base local state (keep .vibe-memory/ — it is meant to be committed)
+.vibe/state.json
+
+# OS / editor
+.DS_Store
 `;
