@@ -3,6 +3,7 @@ import { RegisterAppRequestSchema } from "@vibe/shared";
 import { query } from "../db.js";
 import { audit } from "../lib/audit.js";
 import { appSummary, getApp, listApps } from "../repo.js";
+import { destroyApp } from "../services/teardown.js";
 import { requireOwner } from "./guards.js";
 
 export async function appRoutes(app: FastifyInstance): Promise<void> {
@@ -97,12 +98,8 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
 
       const hardDelete = req.query.confirm === req.params.id;
       if (hardDelete) {
-        await query("DELETE FROM apps WHERE id = $1", [req.params.id]);
-        await audit({
-          actorEmail: actor.email,
-          action: "app.delete",
-          appId: req.params.id,
-        });
+        // Full teardown: container(s), database, storage, routing, records.
+        await destroyApp(req.params.id, actor.email);
         return reply.send({ deleted: true });
       }
       await query("UPDATE apps SET status = 'archived', updated_at = now() WHERE id = $1", [

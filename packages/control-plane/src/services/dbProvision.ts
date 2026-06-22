@@ -82,3 +82,40 @@ export async function isDatabaseProvisioned(appId: string): Promise<boolean> {
   const res = await query("SELECT 1 FROM db_provisions WHERE app_id = $1", [appId]);
   return !!res.rowCount;
 }
+
+/**
+ * Tear down the app's dedicated database and login role on the VPS, then drop
+ * the provisioning record. Idempotent: a no-op when nothing was provisioned.
+ * DROP DATABASE/ROLE cannot run inside a transaction, so we use the raw pool.
+ * Best-effort on the SQL side — a failure to drop must not strand the rest of
+ * the teardown — but the record is only removed once the database is gone.
+ */
+export async function deprovisionDatabase(appId: string): Promise<void> {
+  const row = await one<DbProvisionRow>(
+    "SELECT * FROM db_provisions WHERE app_id = $1",
+    [appId]
+  );
+  if (!row) return;
+  const pool = getPool();
+
+  // Kick off any open sessions so DROP DATABASE isn't blocked by connections.
+  await pool
+    .query(
+      `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+        WHERE datname = $1 AND pid <> pg_backend_pid()`,
+      [row.db_name]
+    )
+    .catch(() => {});
+
+  // Identifiers are derived from ident()/the role name (sanitized to
+  // [a-z0-9_]), so they are safe to interpolate here.
+  await pool.query(`DROP DATABASE IF EXISTS "${row.db_name}"`);
+  // The role can only be dropped once it owns nothing — which holds now that
+  // its single database is gone.
+  await pool.query(`DROP ROLE IF EXISTS "${row.db_user}"`).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error(`[deprovision] could not drop role ${row.db_user}`, err);
+  });
+
+  await query("DELETE FROM db_provisions WHERE app_id = $1", [appId]);
+}

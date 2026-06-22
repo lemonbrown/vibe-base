@@ -157,6 +157,18 @@ export async function portalRoutes(app: FastifyInstance): Promise<void> {
 
       <div class="card"><h2>Runtime logs</h2><pre>${esc(runtimeLog) || "(no logs)"}</pre></div>
       <div class="card"><h2>Build log (current)</h2><pre>${esc(cur?.build_log ?? "") || "(none)"}</pre></div>
+
+      <div class="card" style="border-color:#5a2730">
+        <h2 class="bad">Danger zone</h2>
+        <p>Permanently delete this app: its container, database, storage bucket,
+           routing, and all records. This cannot be undone. Your GitHub repo is
+           left untouched.</p>
+        <form class="inline" method="post" action="/apps/${row.id}/delete"
+              onsubmit="return confirm('Permanently delete ${esc(row.name)}? This cannot be undone.')">
+          <input name="confirm" placeholder="type ${esc(row.id)} to confirm" required>
+          <button style="background:#b3303c">Delete app</button>
+        </form>
+      </div>
     `;
     return reply.type("text/html").send(shell(`${row.name} · Vibe Base`, body));
   });
@@ -203,6 +215,25 @@ export async function portalRoutes(app: FastifyInstance): Promise<void> {
              <pre>${esc(claim)}</pre></div>`
           )
         );
+    }
+  );
+
+  // Hard delete from the portal: requires the typed confirmation to equal the
+  // app id, then runs the same teardown as the API and returns to the list.
+  app.post<{ Params: { id: string }; Body: { confirm?: string } }>(
+    "/apps/:id/delete",
+    async (req, reply) => {
+      const actor = await ownerPage(req, reply);
+      if (!actor) return;
+      if (req.body?.confirm !== req.params.id) {
+        return reply.redirect(`/apps/${req.params.id}`);
+      }
+      await app.inject({
+        method: "DELETE",
+        url: `/api/apps/${req.params.id}?confirm=${encodeURIComponent(req.params.id)}`,
+        headers: { authorization: `Bearer ${loadConfig().ownerToken}` },
+      });
+      return reply.redirect("/");
     }
   );
 }

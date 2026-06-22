@@ -108,4 +108,13 @@ export const api = {
       "GET",
       `/api/apps/${id}/github`
     ),
+
+  // Hard delete: tears down container(s), database, storage, and routing on
+  // the VPS, then removes all records. The `confirm` query param (= the app
+  // id) is what the control plane requires to distinguish this from archive.
+  deleteApp: (id: string) =>
+    call<{ deleted: boolean }>(
+      "DELETE",
+      `/api/apps/${id}?confirm=${encodeURIComponent(id)}`
+    ),
 };

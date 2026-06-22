@@ -166,6 +166,11 @@ export async function removeContainer(name: string): Promise<void> {
   await docker(["rm", "-f", name], { timeoutMs: 30_000 });
 }
 
+/** Remove an image by tag/ref. Best-effort: ignores "in use"/"not found". */
+export async function removeImage(ref: string): Promise<void> {
+  await docker(["rmi", "-f", ref], { timeoutMs: 60_000 });
+}
+
 export async function containerLogs(name: string, tail = 200): Promise<string> {
   const res = await docker(["logs", "--tail", String(tail), name], {
     timeoutMs: 30_000,

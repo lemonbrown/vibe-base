@@ -1,6 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { execFile, spawn } from "node:child_process";
+import { createInterface } from "node:readline/promises";
 import { promisify } from "node:util";
 import { parseManifest, type Manifest } from "@vibe/shared";
 import { api, ApiError } from "./client.js";
@@ -532,6 +533,51 @@ export async function cmdRollback(): Promise<void> {
   const m = await loadManifest(cwd());
   const res = await api.rollback(m.id);
   log(`Rolled back to ${res.rolledBackTo}`);
+}
+
+/* -------------------------------- delete ------------------------------ */
+
+/** Prompt on the TTY for the exact text in `expected`. Returns false on EOF. */
+async function promptMatches(question: string, expected: string): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await rl.question(question);
+    return answer.trim() === expected;
+  } catch {
+    return false; // non-interactive / EOF
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * Permanently delete the current app from the control plane. This tears down
+ * its container, database, storage bucket, and routing on the VPS and removes
+ * every platform record — it cannot be undone. The local code and any GitHub
+ * repo are left in place.
+ */
+export async function cmdDelete(opts: { yes?: boolean } = {}): Promise<void> {
+  const m = await loadManifest(cwd());
+
+  if (!opts.yes) {
+    log(
+      `This permanently deletes "${m.name}" (${m.id}):\n` +
+        "  • its running container(s)\n" +
+        "  • its database (if any) and all data in it\n" +
+        "  • its storage bucket and all files\n" +
+        "  • its routing and all platform records\n" +
+        "This cannot be undone. Your local code and GitHub repo are untouched.\n"
+    );
+    const ok = await promptMatches(`Type the app id (${m.id}) to confirm: `, m.id);
+    if (!ok) {
+      log("Aborted — nothing was deleted.");
+      return;
+    }
+  }
+
+  log(`Deleting ${m.id}…`);
+  await api.deleteApp(m.id);
+  log(`\n✓ Deleted ${m.id}. Removed its container, database, storage, and routing.`);
 }
 
 /* -------------------------------- login ------------------------------- */

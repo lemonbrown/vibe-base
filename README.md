@@ -141,6 +141,7 @@ cd examples/sample-app
 vibe deploy                             # → https://sample-app.apps.example.com
 vibe status
 vibe invite friend@example.com --role member
+vibe delete                             # tear down container, db, storage, routing, records
 ```
 
 > The CLI authenticates as the owner with the bearer token. Browser login

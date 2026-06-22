@@ -3,6 +3,7 @@ import { Command } from "commander";
 import {
   cmdApps,
   cmdContext,
+  cmdDelete,
   cmdDeploy,
   cmdDetect,
   cmdDoctor,
@@ -88,6 +89,12 @@ program
   .description("Invite a user; returns a claim link to share")
   .option("--role <role>", "owner | leader | member", "member")
   .action(wrap((email: string, opts: { role: string }) => cmdInvite(email, opts.role)));
+
+program
+  .command("delete")
+  .description("Permanently delete this app: container, database, storage, routing, and records")
+  .option("-y, --yes", "skip the confirmation prompt")
+  .action(wrap((opts: { yes?: boolean }) => cmdDelete(opts)));
 
 program.command("apps").description("List all apps").action(wrap(cmdApps));
 program.command("open").description("Open the deployed app in a browser").action(wrap(cmdOpen));
