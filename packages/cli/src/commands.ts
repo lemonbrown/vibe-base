@@ -20,6 +20,12 @@ function log(s = ""): void {
 const rel = (dir: string, p: string) =>
   p.replace(dir + "/", "").replace(dir + "\\", "");
 
+/** Derive a GitHub SSH remote from an HTTPS clone URL. */
+function toSshUrl(httpsUrl: string): string | undefined {
+  const m = httpsUrl.match(/^https?:\/\/([^/]+)\/(.+?)(?:\.git)?$/);
+  return m ? `git@${m[1]}:${m[2]}.git` : undefined;
+}
+
 /** Run a git command in `dir`. Never throws; inspect `.ok`. */
 async function git(
   args: string[],
@@ -76,7 +82,8 @@ async function connectGithub(
   });
   log(`  ${gh.htmlUrl}`);
 
-  // Local git: init if needed, commit, set the remote, push.
+  // Local git: init if needed, commit, then push — preferring SSH with an
+  // HTTPS fallback, since most setups have only one of the two authenticated.
   const branch = gh.defaultBranch || "main";
   if (!(await git(["rev-parse", "--is-inside-work-tree"], dir)).ok) {
     await git(["init"], dir);
@@ -84,21 +91,37 @@ async function connectGithub(
   await git(["add", "-A"], dir);
   await git(["commit", "-m", "Initial commit (Vibe Base)"], dir);
   await git(["branch", "-M", branch], dir);
-  const hasOrigin = (await git(["remote", "get-url", "origin"], dir)).ok;
-  await git(
-    hasOrigin
-      ? ["remote", "set-url", "origin", gh.cloneUrl]
-      : ["remote", "add", "origin", gh.cloneUrl],
-    dir
-  );
 
-  log(`Pushing to ${gh.repo}…`);
-  const push = await git(["push", "-u", "origin", branch], dir);
-  if (push.ok) {
+  const candidates: Array<{ name: string; url: string }> = [];
+  const sshUrl = gh.sshUrl ?? toSshUrl(gh.cloneUrl);
+  if (sshUrl) candidates.push({ name: "SSH", url: sshUrl });
+  candidates.push({ name: "HTTPS", url: gh.cloneUrl });
+
+  let pushed = false;
+  let lastOut = "";
+  for (const c of candidates) {
+    const hasOrigin = (await git(["remote", "get-url", "origin"], dir)).ok;
+    await git(
+      hasOrigin
+        ? ["remote", "set-url", "origin", c.url]
+        : ["remote", "add", "origin", c.url],
+      dir
+    );
+    log(`Pushing to ${gh.repo} over ${c.name}…`);
+    const push = await git(["push", "-u", "origin", branch], dir);
+    if (push.ok) {
+      pushed = true;
+      break;
+    }
+    lastOut = push.out;
+    log(`  ${c.name} push failed.`);
+  }
+
+  if (pushed) {
     log("\n✓ Connected. Pushing to main now builds + deploys via GitHub Actions.");
   } else {
     log("\n⚠ Repo created and remote configured, but the push failed:");
-    log(push.out.split("\n").slice(-6).join("\n"));
+    log(lastOut.split("\n").slice(-6).join("\n"));
     log(`\nFinish manually once your git auth is set up:\n  git push -u origin ${branch}`);
   }
 }

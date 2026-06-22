@@ -59,6 +59,7 @@ export async function githubRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({
       repo: repo.fullName,
       cloneUrl: repo.cloneUrl,
+      sshUrl: repo.sshUrl,
       htmlUrl: repo.htmlUrl,
       defaultBranch: repo.defaultBranch,
     });

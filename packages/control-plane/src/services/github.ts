@@ -51,6 +51,7 @@ async function gh<T>(
 export interface CreatedRepo {
   fullName: string;
   cloneUrl: string;
+  sshUrl: string;
   htmlUrl: string;
   defaultBranch: string;
 }
@@ -58,6 +59,7 @@ export interface CreatedRepo {
 interface RepoResponse {
   full_name: string;
   clone_url: string;
+  ssh_url: string;
   html_url: string;
   default_branch: string;
 }
@@ -81,6 +83,7 @@ export async function createRepo(opts: {
   return {
     fullName: r.full_name,
     cloneUrl: r.clone_url,
+    sshUrl: r.ssh_url,
     htmlUrl: r.html_url,
     defaultBranch: r.default_branch || "main",
   };

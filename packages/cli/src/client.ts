@@ -98,6 +98,7 @@ export const api = {
     call<{
       repo: string;
       cloneUrl: string;
+      sshUrl?: string;
       htmlUrl: string;
       defaultBranch: string;
     }>("POST", `/api/apps/${id}/github/repo`, { body }),
