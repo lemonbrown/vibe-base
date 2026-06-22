@@ -136,6 +136,22 @@ export async function setActionsVariable(
   }
 }
 
+/**
+ * Allow the per-run GITHUB_TOKEN to write — required so the deploy workflow can
+ * push the built image to GHCR. Many accounts default this to read-only, which
+ * surfaces as `denied: permission_denied: write_package` on `docker push`.
+ * Setting it at repo-creation time means new apps never hit that wall.
+ */
+export async function setDefaultWorkflowPermissions(
+  fullName: string,
+  permission: "read" | "write" = "write"
+): Promise<void> {
+  await gh("PUT", `/repos/${fullName}/actions/permissions/workflow`, {
+    default_workflow_permissions: permission,
+    can_approve_pull_request_reviews: false,
+  });
+}
+
 /** Create a GitHub Deployment; returns its numeric id. */
 export async function createDeployment(
   fullName: string,

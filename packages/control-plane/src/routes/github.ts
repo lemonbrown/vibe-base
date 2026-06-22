@@ -2,7 +2,12 @@ import type { FastifyInstance } from "fastify";
 import { loadConfig } from "../config.js";
 import { audit } from "../lib/audit.js";
 import { getApp, getAppRepo, upsertAppRepo } from "../repo.js";
-import { createRepo, setActionsSecret, setActionsVariable } from "../services/github.js";
+import {
+  createRepo,
+  setActionsSecret,
+  setActionsVariable,
+  setDefaultWorkflowPermissions,
+} from "../services/github.js";
 import { requireOwner } from "./guards.js";
 
 export async function githubRoutes(app: FastifyInstance): Promise<void> {
@@ -39,6 +44,8 @@ export async function githubRoutes(app: FastifyInstance): Promise<void> {
       await setActionsSecret(repo.fullName, "VIBE_DEPLOY_TOKEN", cfg.ownerToken);
       await setActionsVariable(repo.fullName, "VIBE_API_URL", `https://${cfg.controlPlaneDomain}`);
       await setActionsVariable(repo.fullName, "VIBE_APP_ID", appRow.id);
+      // Let the workflow's GITHUB_TOKEN push the built image to GHCR.
+      await setDefaultWorkflowPermissions(repo.fullName, "write");
     } catch (err) {
       req.log.warn(`[github] could not set Actions config: ${(err as Error).message}`);
     }
