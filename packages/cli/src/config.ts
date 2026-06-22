@@ -34,6 +34,18 @@ export async function loadCredentials(): Promise<Credentials> {
   }
 }
 
+/** True if credentials are available (env or saved file), without throwing. */
+export async function hasCredentials(): Promise<boolean> {
+  if (process.env.VIBE_API_URL && process.env.VIBE_TOKEN) return true;
+  try {
+    const raw = await readFile(credPath(), "utf8");
+    const parsed = JSON.parse(raw) as Partial<Credentials>;
+    return Boolean(parsed.apiUrl && parsed.token);
+  } catch {
+    return false;
+  }
+}
+
 export async function saveCredentials(creds: Credentials): Promise<void> {
   const p = credPath();
   await mkdir(dirname(p), { recursive: true });

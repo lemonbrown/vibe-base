@@ -3,7 +3,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { parseManifest, type Manifest } from "@vibe/shared";
 import { api, ApiError } from "./client.js";
-import { saveCredentials } from "./config.js";
+import { hasCredentials, saveCredentials } from "./config.js";
 import { detect } from "./detect.js";
 import { hasManifest, loadManifest, saveManifest, slugify } from "./manifest.js";
 import { packProject } from "./pack.js";
@@ -47,6 +47,19 @@ async function connectGithub(
   manifest: Manifest,
   opts: { private?: boolean }
 ): Promise<void> {
+  // Preflight: fail fast with actionable guidance before changing anything.
+  if (!(await hasCredentials())) {
+    throw new Error(
+      "Not logged in to the control plane. Ask the user for their Vibe Base " +
+        "control-plane URL and owner token, then run:\n" +
+        "  vibe login --url <control-plane-url> --token <owner-token>\n" +
+        "Do not fabricate these values."
+    );
+  }
+  if (!(await git(["--version"], dir)).ok) {
+    throw new Error("git was not found on PATH — it is required to push to GitHub.");
+  }
+
   log("Registering app with the control plane…");
   await api.registerApp(manifest);
 
@@ -182,6 +195,15 @@ export async function cmdDoctor(): Promise<void> {
   } catch (e) {
     issues.push(`manifest invalid: ${(e as Error).message}`);
   }
+
+  // Auth + tooling preflight — what `vibe init --github` / `deploy` need.
+  if (await hasCredentials()) oks.push("logged in to a control plane");
+  else
+    issues.push(
+      "not logged in — run `vibe login --url <url> --token <token>` (ask the user for these)"
+    );
+  if ((await git(["--version"], cwd())).ok) oks.push("git available");
+  else issues.push("git not found on PATH (needed to push to GitHub)");
 
   for (const o of oks) log(`✓ ${o}`);
   for (const i of issues) log(`⚠ ${i}`);

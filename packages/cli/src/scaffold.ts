@@ -39,6 +39,11 @@ Rules:
 - Keep \`.vibe-memory/\` up to date after meaningful changes.
 
 Deploying (GitHub is the default path):
+- **Credentials:** if any \`vibe\` command reports you are not logged in, stop and
+  ask the user for their control-plane URL and owner token, then run
+  \`vibe login --url <url> --token <token>\`. Never invent credentials. Pushing to
+  GitHub also needs the user's local git auth (e.g. \`gh auth login\`). Run
+  \`vibe doctor\` to check both before deploying.
 - If this app isn't connected to GitHub yet, run \`vibe init --github\` (new
   project) or \`vibe github connect\` (existing one). This creates the repo,
   scaffolds CI, and pushes.
