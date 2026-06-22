@@ -44,6 +44,28 @@ async function git(
 }
 
 /**
+ * Ensure the project is a git repo with the scaffold committed. Run by every
+ * `vibe init` so an app is always version-controlled from the start — GitHub
+ * connection is a separate, later step. Idempotent and best-effort.
+ */
+async function ensureGitRepo(dir: string): Promise<boolean> {
+  if (!(await git(["--version"], dir)).ok) return false; // git not installed
+
+  const inside = (await git(["rev-parse", "--is-inside-work-tree"], dir)).ok;
+  if (!inside) {
+    if (!(await git(["init"], dir)).ok) return false;
+    await git(["branch", "-M", "main"], dir);
+  }
+  // Make an initial commit only if the repo has no commits yet.
+  const hasHead = (await git(["rev-parse", "--verify", "HEAD"], dir)).ok;
+  if (!hasHead) {
+    await git(["add", "-A"], dir);
+    await git(["commit", "-m", "Initial commit (Vibe Base)"], dir);
+  }
+  return !inside; // true when we created the repo just now
+}
+
+/**
  * Register the app, scaffold CI, create a GitHub repo, and push the code so
  * the first deploy runs through Actions. Shared by `init --github` and
  * `github connect`.
@@ -170,13 +192,18 @@ export async function cmdInit(opts: {
     log("\nScaffolded:");
     for (const c of created) log(`  + ${c.replace(dir + "/", "").replace(dir + "\\", "")}`);
   }
+
+  // Always version-control the app locally — never depend on the agent for this.
+  const initedRepo = await ensureGitRepo(dir);
+  if (initedRepo) log("\nInitialized a git repository.");
+
   if (opts.github) {
     log("");
     await connectGithub(dir, manifest, { private: opts.private });
   } else {
     log(
       "\nNext: review vibe.app.yaml, then run `vibe init --github` to create a" +
-        "\nrepo and deploy via GitHub (or `vibe deploy` to build on the VPS)."
+        "\nGitHub repo and deploy via GitHub (or `vibe deploy` to build on the VPS)."
     );
   }
 }

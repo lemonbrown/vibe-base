@@ -23,6 +23,8 @@ const AGENTS_MD = `# LLM Instructions for this App
 This project uses **Vibe Base**. Infrastructure (deploy, database, storage,
 auth, domains) is provided by the platform — do not reinvent it.
 
+\`vibe init\` already made this a git repository. Commit your work as you go.
+
 **You are expected to operate the platform on the user's behalf.** When a task
 needs a \`vibe\` / \`git\` command, run it yourself in your shell — don't hand the
 user a list of commands to run. The only exception is credentials you cannot
