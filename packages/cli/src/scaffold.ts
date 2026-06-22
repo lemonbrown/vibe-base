@@ -23,6 +23,11 @@ const AGENTS_MD = `# LLM Instructions for this App
 This project uses **Vibe Base**. Infrastructure (deploy, database, storage,
 auth, domains) is provided by the platform — do not reinvent it.
 
+**You are expected to operate the platform on the user's behalf.** When a task
+needs a \`vibe\` / \`git\` command, run it yourself in your shell — don't hand the
+user a list of commands to run. The only exception is credentials you cannot
+supply (control-plane login, git auth), where you pause and ask the user.
+
 Before making changes:
 1. Read \`vibe.app.yaml\` (the source of truth).
 2. Run \`vibe context\` for a compact summary of this app.
@@ -49,9 +54,15 @@ Deploying (GitHub is the default path):
   \`vibe login --url <url> --token <token>\`. Never invent credentials. Pushing to
   GitHub also needs the user's local git auth (e.g. \`gh auth login\`). Run
   \`vibe doctor\` to check both before deploying.
+- **You (the agent) run these commands yourself** — do not print the steps and
+  ask the user to run them. The point of Vibe Base is that you deploy the app,
+  not the user. The only thing you escalate is missing credentials (above).
 - If this app isn't connected to GitHub yet, run \`vibe init --github\` (new
-  project) or \`vibe github connect\` (existing one). This creates the repo,
-  scaffolds CI, and pushes.
+  project) or \`vibe github connect\` (existing one), then commit and push — do
+  this end to end without pausing:
+    vibe github connect            # skip if a git remote already exists
+    git add -A && git commit -m "<message>"
+    git push origin main
 - After that, **deploy by committing and pushing to \`main\`.** GitHub Actions
   builds the image and the platform rolls it out — do not run \`vibe deploy\` for
   normal changes.
