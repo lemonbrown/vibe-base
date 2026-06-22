@@ -65,6 +65,17 @@ export interface Config {
     /** When true, create repos under the org `owner`; otherwise under /user. */
     ownerIsOrg: boolean;
   };
+  /** Platform SMTP for app email. Empty host means email is not configured. */
+  smtp: {
+    host: string;
+    port: number;
+    user: string;
+    pass: string;
+    /** Shared sender address all apps send from (e.g. you@gmail.com). */
+    from: string;
+    /** true for implicit TLS (port 465); false for STARTTLS (port 587). */
+    secure: boolean;
+  };
 }
 
 let cached: Config | null = null;
@@ -104,6 +115,14 @@ export function loadConfig(): Config {
       apiBase: opt("GITHUB_API_BASE", "https://api.github.com"),
       owner: opt("GITHUB_DEFAULT_OWNER", ""),
       ownerIsOrg: opt("GITHUB_OWNER_IS_ORG", "false") === "true",
+    },
+    smtp: {
+      host: opt("SMTP_HOST", ""),
+      port: Number(opt("SMTP_PORT", "587")),
+      user: opt("SMTP_USER", ""),
+      pass: opt("SMTP_PASS", ""),
+      from: opt("SMTP_FROM", ""),
+      secure: opt("SMTP_SECURE", "false") === "true",
     },
   };
   return cached;

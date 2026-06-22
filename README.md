@@ -38,8 +38,11 @@ subdomain, log in, read its state with an LLM*:
   list, app detail (status, logs, members, invite, rollback).
 - **LLM-readable project files** — `vibe.app.yaml`, `AGENTS.md`, `.vibe-memory/`.
 
+Apps can also send email: enable `capabilities.email` and the platform injects
+`SMTP_*` env (a single shared sender configured on the control plane).
+
 Deferred (post-MVP, per the spec): backups/restore, app actions + MCP server,
-scheduled jobs, email, custom domains, memory-staleness enforcement.
+scheduled jobs, custom domains, memory-staleness enforcement.
 
 ## Architecture
 

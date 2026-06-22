@@ -16,6 +16,7 @@ import {
 } from "../services/docker.js";
 import { ensureDockerfile } from "../services/runtime.js";
 import { provisionDatabase } from "../services/dbProvision.js";
+import { emailEnvFor } from "../services/email.js";
 import { provisionStorage, storageEnvFor } from "../services/storage.js";
 import { upsertAppRoute } from "../services/caddy.js";
 import {
@@ -159,6 +160,11 @@ async function runDeploy(
     if (m.capabilities.storage) {
       await provisionStorage(app.id);
       Object.assign(env, (await storageEnvFor(app.id)) ?? {});
+    }
+    if (m.capabilities.email) {
+      const emailEnv = emailEnvFor();
+      if (emailEnv) Object.assign(env, emailEnv);
+      else await appendLog(deploymentId, "[vibe] email capability enabled but no platform SMTP configured — skipping");
     }
 
     // Migrations (run as a one-off before the new container takes traffic).
