@@ -13,9 +13,12 @@ export interface ExecResult {
 }
 
 /** Run a docker command, capturing combined output. Never rejects on non-zero. */
-function docker(args: string[], opts: { timeoutMs?: number } = {}): Promise<ExecResult> {
+function docker(
+  args: string[],
+  opts: { timeoutMs?: number; input?: string } = {}
+): Promise<ExecResult> {
   return new Promise((resolve) => {
-    execFile(
+    const child = execFile(
       "docker",
       args,
       { timeout: opts.timeoutMs ?? 600_000, maxBuffer: 64 * 1024 * 1024 },
@@ -29,6 +32,9 @@ function docker(args: string[], opts: { timeoutMs?: number } = {}): Promise<Exec
         resolve({ code, stdout: stdout.toString(), stderr: stderr.toString() });
       }
     );
+    if (opts.input !== undefined && child.stdin) {
+      child.stdin.end(opts.input);
+    }
   });
 }
 
@@ -65,6 +71,33 @@ export async function buildImage(
     imageTag,
     log: `$ docker build -t ${imageTag}\n${res.stdout}\n${res.stderr}`,
   };
+}
+
+/** Pull an image from a registry. Never rejects; inspect `.code`. */
+export async function pullImage(ref: string): Promise<ExecResult> {
+  return docker(["pull", ref]);
+}
+
+/**
+ * Log the host docker daemon into the configured registry so private app
+ * images can be pulled. Best-effort and idempotent: a blank token (public
+ * images only) is treated as success. Returns false if login was attempted
+ * and failed.
+ */
+export async function ensureRegistryAuth(): Promise<boolean> {
+  const { registry } = loadConfig();
+  if (!registry.token || !registry.username) return true;
+  const res = await docker(
+    [
+      "login",
+      registry.host,
+      "-u",
+      registry.username,
+      "--password-stdin",
+    ],
+    { input: registry.token }
+  );
+  return res.code === 0;
 }
 
 export interface RunOptions {

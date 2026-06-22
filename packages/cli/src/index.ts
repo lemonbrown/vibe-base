@@ -6,6 +6,7 @@ import {
   cmdDeploy,
   cmdDetect,
   cmdDoctor,
+  cmdGithubConnect,
   cmdInit,
   cmdInvite,
   cmdLogin,
@@ -39,11 +40,23 @@ program
   .command("init")
   .description("Scaffold vibe.app.yaml, AGENTS.md, and .vibe-memory")
   .option("--name <name>", "app name")
-  .action(wrap((opts: { name?: string }) => cmdInit(opts)));
+  .option("--github", "also create a GitHub repo and wire up CI deploys")
+  .option("--private", "make the GitHub repo private (default)", true)
+  .option("--public", "make the GitHub repo public")
+  .action(
+    wrap((opts: { name?: string; github?: boolean; private?: boolean; public?: boolean }) =>
+      cmdInit({ ...opts, private: opts.public ? false : opts.private })
+    )
+  );
 
 program.command("detect").description("Show detected runtime").action(wrap(cmdDetect));
 program.command("doctor").description("Check the project for problems").action(wrap(cmdDoctor));
-program.command("deploy").description("Build and deploy the app").action(wrap(cmdDeploy));
+
+program
+  .command("deploy")
+  .description("Build and deploy the app (or --image to deploy a prebuilt image)")
+  .option("--image <ref>", "deploy a prebuilt image instead of building")
+  .action(wrap((opts: { image?: string }) => cmdDeploy(opts)));
 
 program
   .command("status")
@@ -77,5 +90,17 @@ deploy
   .command("rollback")
   .description("Roll back to the previous deployment")
   .action(wrap(cmdRollback));
+
+const github = program.command("github").description("GitHub integration");
+github
+  .command("connect")
+  .description("Create a GitHub repo for this app and wire up CI deploys")
+  .option("--private", "make the repo private (default)", true)
+  .option("--public", "make the repo public")
+  .action(
+    wrap((opts: { private?: boolean; public?: boolean }) =>
+      cmdGithubConnect({ private: opts.public ? false : opts.private })
+    )
+  );
 
 program.parseAsync(process.argv);

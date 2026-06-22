@@ -115,6 +115,27 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    id: "0002_deploy_source",
+    sql: `
+      ALTER TABLE deployments ADD COLUMN IF NOT EXISTS source  TEXT NOT NULL DEFAULT 'context';
+      ALTER TABLE deployments ADD COLUMN IF NOT EXISTS git_sha TEXT;
+      ALTER TABLE deployments ADD COLUMN IF NOT EXISTS git_ref TEXT;
+    `,
+  },
+  {
+    id: "0003_app_repos",
+    sql: `
+      CREATE TABLE IF NOT EXISTS app_repos (
+        app_id         TEXT PRIMARY KEY REFERENCES apps(id) ON DELETE CASCADE,
+        provider       TEXT NOT NULL DEFAULT 'github',
+        repo_full_name TEXT NOT NULL,
+        default_branch TEXT NOT NULL DEFAULT 'main',
+        html_url       TEXT,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

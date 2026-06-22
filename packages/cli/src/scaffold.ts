@@ -1,6 +1,6 @@
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Manifest } from "@vibe/shared";
+import { generateDockerfile, type Manifest } from "@vibe/shared";
 
 async function exists(p: string): Promise<boolean> {
   try {
@@ -37,7 +37,18 @@ Rules:
 - Use \`DATABASE_URL\` for Postgres and the \`S3_*\` vars for storage (only if enabled).
 - Expose a health endpoint at the path in \`vibe.app.yaml\` (runtime.healthPath).
 - Keep \`.vibe-memory/\` up to date after meaningful changes.
-- Deploy with \`vibe deploy\`.
+
+Deploying (GitHub is the default path):
+- If this app isn't connected to GitHub yet, run \`vibe init --github\` (new
+  project) or \`vibe github connect\` (existing one). This creates the repo,
+  scaffolds CI, and pushes.
+- After that, **deploy by committing and pushing to \`main\`.** GitHub Actions
+  builds the image and the platform rolls it out — do not run \`vibe deploy\` for
+  normal changes.
+- The repo's \`Dockerfile\` defines the build; keep it working. (\`custom-dockerfile\`
+  apps own theirs; others get one generated from \`vibe.app.yaml\`.)
+- Check progress with \`vibe status\` / \`vibe logs\`; the repo's Deployments tab
+  also shows rollout state.
 `;
 
 function overviewMd(m: Manifest): string {
@@ -84,8 +95,17 @@ ${m.capabilities.storage ? "- `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S
 const RUNBOOK_MD = `# Runbook
 
 ## Deploy
-\`vibe deploy\` — tars the project, builds a container, runs migrations,
-health-checks, then flips the proxy to the new version.
+This app deploys through GitHub Actions. Push to \`main\` to ship:
+\`git push\` → CI builds + pushes an image to GHCR → the platform pulls it, runs
+migrations, health-checks, then flips the proxy to the new version. Rollout
+state shows up in the repo's Deployments tab.
+
+First-time setup: \`vibe init --github\` (new project) or \`vibe github connect\`
+(existing one) creates the repo and wires up CI.
+
+Manual / no-GitHub fallbacks:
+- \`vibe deploy\` — build the context on the VPS instead of via CI.
+- \`vibe deploy --image <ref>\` — deploy a specific prebuilt image.
 
 ## Logs
 - \`vibe logs\` — runtime logs of the live container.
@@ -133,6 +153,80 @@ export async function scaffold(cwd: string, m: Manifest): Promise<ScaffoldResult
     JSON.stringify(m.runtime, null, 2),
     "utf8"
   );
+  return { created };
+}
+
+const DEPLOY_WORKFLOW = `name: Deploy to Vibe Base
+
+# Build the image in CI, push it to GHCR, then tell the control plane to pull
+# and roll it out. Secrets/variables are provisioned by \`vibe github connect\`.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image name (lowercase)
+        id: img
+        run: echo "image=ghcr.io/$(echo '\${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: \${{ github.actor }}
+          password: \${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: \${{ steps.img.outputs.image }}:\${{ github.sha }}
+
+      - name: Trigger Vibe Base deploy
+        env:
+          VIBE_API_URL: \${{ vars.VIBE_API_URL }}
+          VIBE_APP_ID: \${{ vars.VIBE_APP_ID }}
+          VIBE_DEPLOY_TOKEN: \${{ secrets.VIBE_DEPLOY_TOKEN }}
+          IMAGE: \${{ steps.img.outputs.image }}:\${{ github.sha }}
+        run: |
+          curl -fsS -X POST "$VIBE_API_URL/api/apps/$VIBE_APP_ID/deploy/image" \\
+            -H "authorization: Bearer $VIBE_DEPLOY_TOKEN" \\
+            -H "content-type: application/json" \\
+            -d "{\\"image\\":\\"$IMAGE\\",\\"sha\\":\\"\${{ github.sha }}\\",\\"ref\\":\\"\${{ github.ref }}\\"}"
+`;
+
+/**
+ * Files needed for the GitHub-driven deploy flow: the Actions workflow and a
+ * Dockerfile (CI builds the image, so the repo must contain one). Both are
+ * written only if missing. Custom-dockerfile apps already ship their own.
+ */
+export async function scaffoldGithub(
+  cwd: string,
+  m: Manifest
+): Promise<ScaffoldResult> {
+  const created: string[] = [];
+  const wfDir = join(cwd, ".github", "workflows");
+  await mkdir(wfDir, { recursive: true });
+
+  if (await writeIfMissing(join(wfDir, "deploy.yml"), DEPLOY_WORKFLOW)) {
+    created.push(join(wfDir, "deploy.yml"));
+  }
+  if (m.runtime.adapter !== "custom-dockerfile") {
+    if (await writeIfMissing(join(cwd, "Dockerfile"), generateDockerfile(m))) {
+      created.push(join(cwd, "Dockerfile"));
+    }
+  }
   return { created };
 }
 

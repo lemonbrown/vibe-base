@@ -40,6 +40,9 @@ export type AppSummary = z.infer<typeof AppSummarySchema>;
 
 /* --------------------------- API: deploy ------------------------------ */
 
+export const DeploySourceSchema = z.enum(["context", "image"]);
+export type DeploySource = z.infer<typeof DeploySourceSchema>;
+
 export const DeploymentSchema = z.object({
   id: z.string(),
   appId: z.string(),
@@ -47,6 +50,9 @@ export const DeploymentSchema = z.object({
   imageTag: z.string().nullable(),
   health: HealthSchema,
   error: z.string().nullable(),
+  source: DeploySourceSchema,
+  gitSha: z.string().nullable(),
+  gitRef: z.string().nullable(),
   createdAt: z.string(),
   completedAt: z.string().nullable(),
 });

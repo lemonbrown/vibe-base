@@ -28,12 +28,45 @@ export interface DeploymentRow {
   error: string | null;
   build_log: string;
   rollback_target: string | null;
+  source: string;
+  git_sha: string | null;
+  git_ref: string | null;
   created_at: Date;
   completed_at: Date | null;
 }
 
+export interface AppRepoRow {
+  app_id: string;
+  provider: string;
+  repo_full_name: string;
+  default_branch: string;
+  html_url: string | null;
+  created_at: Date;
+}
+
 export async function getApp(id: string): Promise<AppRow | null> {
   return one<AppRow>("SELECT * FROM apps WHERE id = $1", [id]);
+}
+
+export async function getAppRepo(appId: string): Promise<AppRepoRow | null> {
+  return one<AppRepoRow>("SELECT * FROM app_repos WHERE app_id = $1", [appId]);
+}
+
+export async function upsertAppRepo(repo: {
+  appId: string;
+  repoFullName: string;
+  defaultBranch: string;
+  htmlUrl: string | null;
+}): Promise<void> {
+  await query(
+    `INSERT INTO app_repos (app_id, provider, repo_full_name, default_branch, html_url)
+     VALUES ($1, 'github', $2, $3, $4)
+     ON CONFLICT (app_id) DO UPDATE SET
+       repo_full_name = EXCLUDED.repo_full_name,
+       default_branch = EXCLUDED.default_branch,
+       html_url       = EXCLUDED.html_url`,
+    [repo.appId, repo.repoFullName, repo.defaultBranch, repo.htmlUrl]
+  );
 }
 
 export async function listApps(): Promise<AppRow[]> {
@@ -66,6 +99,9 @@ export function deploymentToContract(row: DeploymentRow): Deployment {
     imageTag: row.image_tag,
     health: row.health as Health,
     error: row.error,
+    source: (row.source as Deployment["source"]) ?? "context",
+    gitSha: row.git_sha,
+    gitRef: row.git_ref,
     createdAt: row.created_at.toISOString(),
     completedAt: row.completed_at ? row.completed_at.toISOString() : null,
   };

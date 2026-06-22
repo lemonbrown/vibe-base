@@ -4,6 +4,7 @@ import { closePool } from "./db.js";
 import { runMigrations } from "./migrations.js";
 import { buildServer } from "./server.js";
 import { ensureBaseConfig } from "./services/caddy.js";
+import { ensureRegistryAuth } from "./services/docker.js";
 
 async function main(): Promise<void> {
   const cfg = loadConfig();
@@ -16,6 +17,16 @@ async function main(): Promise<void> {
     await ensureBaseConfig();
   } catch (err) {
     console.warn("[caddy] base config skipped:", (err as Error).message);
+  }
+
+  // Best-effort: log the host docker daemon into the registry so private app
+  // images can be pulled. No-op when no registry token is configured.
+  try {
+    if (!(await ensureRegistryAuth())) {
+      console.warn("[registry] docker login failed — private image pulls will fail");
+    }
+  } catch (err) {
+    console.warn("[registry] login skipped:", (err as Error).message);
   }
 
   const app = await buildServer();

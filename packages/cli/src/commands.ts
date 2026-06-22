@@ -1,13 +1,15 @@
 import { basename } from "node:path";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import { parseManifest, type Manifest } from "@vibe/shared";
 import { api, ApiError } from "./client.js";
 import { saveCredentials } from "./config.js";
 import { detect } from "./detect.js";
 import { hasManifest, loadManifest, saveManifest, slugify } from "./manifest.js";
 import { packProject } from "./pack.js";
-import { scaffold } from "./scaffold.js";
+import { scaffold, scaffoldGithub } from "./scaffold.js";
 
+const execFileAsync = promisify(execFile);
 const cwd = () => process.cwd();
 
 function log(s = ""): void {
@@ -15,9 +17,86 @@ function log(s = ""): void {
   console.log(s);
 }
 
+const rel = (dir: string, p: string) =>
+  p.replace(dir + "/", "").replace(dir + "\\", "");
+
+/** Run a git command in `dir`. Never throws; inspect `.ok`. */
+async function git(
+  args: string[],
+  dir: string
+): Promise<{ ok: boolean; out: string }> {
+  try {
+    const { stdout, stderr } = await execFileAsync("git", args, { cwd: dir });
+    return { ok: true, out: `${stdout}${stderr}`.trim() };
+  } catch (e) {
+    const err = e as { stdout?: string; stderr?: string; message?: string };
+    return {
+      ok: false,
+      out: `${err.stdout ?? ""}${err.stderr ?? err.message ?? ""}`.trim(),
+    };
+  }
+}
+
+/**
+ * Register the app, scaffold CI, create a GitHub repo, and push the code so
+ * the first deploy runs through Actions. Shared by `init --github` and
+ * `github connect`.
+ */
+async function connectGithub(
+  dir: string,
+  manifest: Manifest,
+  opts: { private?: boolean }
+): Promise<void> {
+  log("Registering app with the control plane…");
+  await api.registerApp(manifest);
+
+  const { created } = await scaffoldGithub(dir, manifest);
+  if (created.length) {
+    log("Scaffolded CI:");
+    for (const c of created) log(`  + ${rel(dir, c)}`);
+  }
+
+  log("Creating GitHub repo…");
+  const gh = await api.createRepo(manifest.id, {
+    name: manifest.id,
+    private: opts.private,
+  });
+  log(`  ${gh.htmlUrl}`);
+
+  // Local git: init if needed, commit, set the remote, push.
+  const branch = gh.defaultBranch || "main";
+  if (!(await git(["rev-parse", "--is-inside-work-tree"], dir)).ok) {
+    await git(["init"], dir);
+  }
+  await git(["add", "-A"], dir);
+  await git(["commit", "-m", "Initial commit (Vibe Base)"], dir);
+  await git(["branch", "-M", branch], dir);
+  const hasOrigin = (await git(["remote", "get-url", "origin"], dir)).ok;
+  await git(
+    hasOrigin
+      ? ["remote", "set-url", "origin", gh.cloneUrl]
+      : ["remote", "add", "origin", gh.cloneUrl],
+    dir
+  );
+
+  log(`Pushing to ${gh.repo}…`);
+  const push = await git(["push", "-u", "origin", branch], dir);
+  if (push.ok) {
+    log("\n✓ Connected. Pushing to main now builds + deploys via GitHub Actions.");
+  } else {
+    log("\n⚠ Repo created and remote configured, but the push failed:");
+    log(push.out.split("\n").slice(-6).join("\n"));
+    log(`\nFinish manually once your git auth is set up:\n  git push -u origin ${branch}`);
+  }
+}
+
 /* -------------------------------- init -------------------------------- */
 
-export async function cmdInit(opts: { name?: string }): Promise<void> {
+export async function cmdInit(opts: {
+  name?: string;
+  github?: boolean;
+  private?: boolean;
+}): Promise<void> {
   const dir = cwd();
   let manifest: Manifest;
 
@@ -55,7 +134,25 @@ export async function cmdInit(opts: { name?: string }): Promise<void> {
     log("\nScaffolded:");
     for (const c of created) log(`  + ${c.replace(dir + "/", "").replace(dir + "\\", "")}`);
   }
-  log("\nNext: review vibe.app.yaml, then run `vibe deploy`.");
+  if (opts.github) {
+    log("");
+    await connectGithub(dir, manifest, { private: opts.private });
+  } else {
+    log(
+      "\nNext: review vibe.app.yaml, then run `vibe init --github` to create a" +
+        "\nrepo and deploy via GitHub (or `vibe deploy` to build on the VPS)."
+    );
+  }
+}
+
+/* ---------------------------- github connect -------------------------- */
+
+export async function cmdGithubConnect(opts: {
+  private?: boolean;
+}): Promise<void> {
+  const dir = cwd();
+  const manifest = await loadManifest(dir);
+  await connectGithub(dir, manifest, { private: opts.private });
 }
 
 /* ------------------------------- detect ------------------------------- */
@@ -95,18 +192,23 @@ export async function cmdDoctor(): Promise<void> {
 
 const TERMINAL = new Set(["live", "failed"]);
 
-export async function cmdDeploy(): Promise<void> {
+export async function cmdDeploy(opts: { image?: string } = {}): Promise<void> {
   const dir = cwd();
   const manifest = await loadManifest(dir);
 
   log(`Registering ${manifest.name}…`);
   await api.registerApp(manifest);
 
-  log("Packaging build context…");
-  const tarGz = await packProject(dir);
-  log(`  context: ${(tarGz.length / 1024 / 1024).toFixed(1)} MB`);
-
-  const { deploymentId } = await api.deploy(manifest.id, tarGz);
+  let deploymentId: string;
+  if (opts.image) {
+    log(`Deploying prebuilt image ${opts.image}…`);
+    ({ deploymentId } = await api.deployImage(manifest.id, { image: opts.image }));
+  } else {
+    log("Packaging build context…");
+    const tarGz = await packProject(dir);
+    log(`  context: ${(tarGz.length / 1024 / 1024).toFixed(1)} MB`);
+    ({ deploymentId } = await api.deploy(manifest.id, tarGz));
+  }
   log(`Deploying (${deploymentId})…`);
 
   let last = "";

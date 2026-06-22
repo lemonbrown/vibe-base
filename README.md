@@ -16,14 +16,21 @@ vibe deploy        # → https://my-app.apps.yourdomain.com
 The spine that produces the magic moment — *describe an app, see it live at a
 subdomain, log in, read its state with an LLM*:
 
-- **`vibe` CLI** — `init`, `detect`, `doctor`, `deploy`, `status`, `logs`,
-  `context`, `invite`, `apps`, `open`, `deploy rollback`, `login`.
+- **`vibe` CLI** — `init` (`--github` to create a repo + CI), `detect`,
+  `doctor`, `deploy` (`--image` to ship a prebuilt image), `status`, `logs`,
+  `context`, `invite`, `apps`, `open`, `deploy rollback`, `github connect`,
+  `login`.
 - **Control plane** (single VPS) — Fastify API + Postgres that the CLI and
   portal both drive.
-- **Deploy engine** — uploads a build context, builds a container, provisions a
-  per-app Postgres database + MinIO bucket, injects env, runs migrations,
-  health-checks, then flips the Caddy route to the new version (old container is
-  kept for rollback).
+- **Deploy engine** — two paths into the same pipeline: either upload a build
+  context and build the container on the VPS, **or** pull a prebuilt image from
+  a registry (GitHub Actions). Then it provisions a per-app Postgres database +
+  MinIO bucket, injects env, runs migrations, health-checks, and flips the Caddy
+  route to the new version (old container is kept for rollback).
+- **GitHub integration** — `vibe init --github` creates a repo, scaffolds a
+  deploy workflow, and wires CI: every push builds + pushes an image to GHCR and
+  triggers a deploy. The control plane mirrors rollout state back to the repo's
+  GitHub Deployments. Auth is a PAT in the control-plane env (MVP).
 - **Gateway auth** — every app sits behind Caddy `forward_auth` → the control
   plane's `/authz`. Apps never implement login; they read the signed-in user
   from `X-Vibe-User-Email` / `X-Vibe-User-Role` headers. Invite-only by default.
@@ -90,6 +97,43 @@ vibe invite friend@example.com --role member
 > The CLI authenticates as the owner with the bearer token. Browser login
 > (portal + apps) uses `OWNER_PASSWORD`, or the `OWNER_TOKEN` if that's unset.
 
+## Deploying through GitHub (build in CI, pull on the VPS)
+
+Instead of building on the VPS, let GitHub Actions build the image and have the
+control plane pull it — this keeps the memory-hungry builds off the droplet.
+
+**One-time control-plane setup** (in `.env`):
+
+- `GITHUB_TOKEN` — a PAT with `repo` + `read:packages`/`write:packages`. Used to
+  create repos, set Actions secrets, and post deployment status.
+- `GHCR_USERNAME` / `GHCR_TOKEN` — credentials the VPS uses to `docker login
+  ghcr.io` so it can pull private app images (`read:packages` is enough).
+- Optional: `GITHUB_DEFAULT_OWNER` (+ `GITHUB_OWNER_IS_ORG=true`) to create
+  repos under an org instead of the token's own account.
+
+**Per app**, from your machine:
+
+```bash
+cd my-app
+vibe init --github       # creates the repo, scaffolds .github/workflows/deploy.yml,
+                         # sets CI secrets/vars, and pushes the code
+# ...or, for an app that already has a manifest:
+vibe github connect
+```
+
+From then on, every push to `main` builds an image, pushes it to
+`ghcr.io/<owner>/<app>:<sha>`, and calls the control plane to roll it out. The
+rollout shows up under the repo's **Deployments**. You can also deploy a
+specific prebuilt image manually:
+
+```bash
+vibe deploy --image ghcr.io/<owner>/<app>:<sha>
+```
+
+The CI flow needs a `Dockerfile` in the repo; `vibe init --github` scaffolds one
+from the manifest's runtime adapter (skipped for `custom-dockerfile` apps, which
+bring their own).
+
 ## Local development of the control plane
 
 `npm run dev:control-plane` runs it with `--watch`. It needs Postgres reachable
@@ -112,11 +156,13 @@ API isn't reachable.
    docker compose up -d --build               # NO override file in prod → 8080 stays private
    ```
    Generate secrets with `openssl rand -hex 32` (OWNER_TOKEN, SESSION_SECRET,
-   POSTGRES_PASSWORD, MINIO_ROOT_PASSWORD).
+   POSTGRES_PASSWORD, MINIO_ROOT_PASSWORD). For GitHub-driven deploys also set
+   `GITHUB_TOKEN` and `GHCR_USERNAME`/`GHCR_TOKEN` (see the GitHub section above).
 4. **From your machine**, point the CLI at the control plane and deploy:
    ```bash
    vibe login --url https://vibe.example.com --token <OWNER_TOKEN>
-   cd my-app && vibe deploy
+   cd my-app && vibe deploy            # build on the VPS…
+   cd my-app && vibe init --github     # …or wire up GitHub CI deploys
    ```
 
 Caddy obtains real Let's Encrypt certs automatically (`TLS_MODE=acme`). Only

@@ -83,4 +83,28 @@ export const api = {
 
   rollback: (id: string) =>
     call<{ rolledBackTo: string }>("POST", `/api/apps/${id}/rollback`),
+
+  deployImage: (
+    id: string,
+    body: { image: string; sha?: string; ref?: string }
+  ) =>
+    call<{ deploymentId: string; appId: string }>(
+      "POST",
+      `/api/apps/${id}/deploy/image`,
+      { body }
+    ),
+
+  createRepo: (id: string, body: { name?: string; private?: boolean } = {}) =>
+    call<{
+      repo: string;
+      cloneUrl: string;
+      htmlUrl: string;
+      defaultBranch: string;
+    }>("POST", `/api/apps/${id}/github/repo`, { body }),
+
+  getGithub: (id: string) =>
+    call<{ repo: string; defaultBranch: string; htmlUrl: string | null }>(
+      "GET",
+      `/api/apps/${id}/github`
+    ),
 };

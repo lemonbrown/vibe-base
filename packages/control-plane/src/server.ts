@@ -11,6 +11,7 @@ import { shortId } from "./lib/ids.js";
 import { appRoutes } from "./routes/apps.js";
 import { authRoutes } from "./routes/auth.js";
 import { deployRoutes } from "./routes/deploy.js";
+import { githubRoutes } from "./routes/github.js";
 import { memberRoutes } from "./routes/members.js";
 import { portalRoutes } from "./routes/portal.js";
 import { statusRoutes } from "./routes/status.js";
@@ -48,6 +49,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(authRoutes);
   await app.register(appRoutes);
   await app.register(deployRoutes);
+  await app.register(githubRoutes);
   await app.register(memberRoutes);
   await app.register(statusRoutes);
   await app.register(portalRoutes);

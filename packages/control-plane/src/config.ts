@@ -49,6 +49,22 @@ export interface Config {
   };
   /** When true, skip TLS-only cookie flag (local dev over http). */
   insecureCookies: boolean;
+  /** Container registry the VPS pulls app images from (ghcr.io). */
+  registry: {
+    host: string;
+    username: string;
+    /** Token with read:packages; empty disables `docker login` (public images only). */
+    token: string;
+  };
+  /** GitHub integration. Empty token disables repo creation + deployment status. */
+  github: {
+    token: string;
+    apiBase: string;
+    /** Default owner (login) new repos are created under. Empty = the token's user. */
+    owner: string;
+    /** When true, create repos under the org `owner`; otherwise under /user. */
+    ownerIsOrg: boolean;
+  };
 }
 
 let cached: Config | null = null;
@@ -78,6 +94,17 @@ export function loadConfig(): Config {
       region: opt("MINIO_REGION", "us-east-1"),
     },
     insecureCookies: opt("INSECURE_COOKIES", "false") === "true",
+    registry: {
+      host: opt("REGISTRY_HOST", "ghcr.io"),
+      username: opt("GHCR_USERNAME", ""),
+      token: opt("GHCR_TOKEN", ""),
+    },
+    github: {
+      token: opt("GITHUB_TOKEN", ""),
+      apiBase: opt("GITHUB_API_BASE", "https://api.github.com"),
+      owner: opt("GITHUB_DEFAULT_OWNER", ""),
+      ownerIsOrg: opt("GITHUB_OWNER_IS_ORG", "false") === "true",
+    },
   };
   return cached;
 }
