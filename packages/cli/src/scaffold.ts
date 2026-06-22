@@ -43,10 +43,12 @@ Rules:
   that capability is enabled. Never wire up your own provider for these.
 - For email (when \`capabilities.email\` is on), branch on \`EMAIL_PROVIDER\` and
   send as \`EMAIL_FROM\`; do not configure your own email service:
+  - \`resend\`: POST to the Resend API (or the \`resend\` package) with
+    \`RESEND_API_KEY\`. Simplest; HTTPS only.
   - \`gmail-api\`: use the \`googleapis\` package with \`GMAIL_CLIENT_ID\`,
-    \`GMAIL_CLIENT_SECRET\`, \`GMAIL_REFRESH_TOKEN\` (OAuth2) to call the Gmail API
-    over HTTPS. Prefer this — it works even where outbound SMTP is blocked.
+    \`GMAIL_CLIENT_SECRET\`, \`GMAIL_REFRESH_TOKEN\` (OAuth2) to call the Gmail API.
   - \`smtp\`: use \`nodemailer\` with \`SMTP_HOST/PORT/USER/PASS/SECURE\`.
+  All three are HTTPS-friendly except \`smtp\`, which needs mail ports open.
 - Expose a health endpoint at the path in \`vibe.app.yaml\` (runtime.healthPath).
 - Keep \`.vibe-memory/\` up to date after meaningful changes.
 - A \`.gitignore\` is scaffolded for you. **Never commit \`.env\` or secrets**, and
@@ -113,7 +115,7 @@ ${m.database?.migrations ? `- Migrations: ${m.database.migrations}` : ""}
 - \`VIBE_APP_ID\`, \`VIBE_APP_NAME\`.
 ${m.capabilities.database ? "- `DATABASE_URL` — Postgres connection string." : ""}
 ${m.capabilities.storage ? "- `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`, `S3_FORCE_PATH_STYLE`." : ""}
-${m.capabilities.email ? "- `EMAIL_PROVIDER` (`gmail-api` or `smtp`) + `EMAIL_FROM`. For `gmail-api`: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` (send via the `googleapis` Gmail API over HTTPS). For `smtp`: `SMTP_HOST/PORT/USER/PASS/SECURE` (nodemailer)." : ""}
+${m.capabilities.email ? "- `EMAIL_PROVIDER` (`resend` | `gmail-api` | `smtp`) + `EMAIL_FROM`. `resend`: `RESEND_API_KEY` (POST to the Resend API / `resend` package). `gmail-api`: `GMAIL_CLIENT_ID/SECRET`, `GMAIL_REFRESH_TOKEN` (the `googleapis` Gmail API). `smtp`: `SMTP_HOST/PORT/USER/PASS/SECURE` (nodemailer)." : ""}
 - \`X-Vibe-User-Email\` / \`X-Vibe-User-Role\` request headers (gateway auth).
 `;
 }

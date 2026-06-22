@@ -5,17 +5,20 @@ import { loadConfig } from "../config.js";
  * control plane. Apps that declare `capabilities.email` receive email env and
  * send themselves — no per-app provisioning (cf. services/storage).
  *
- * Two transports are supported, selected by what's configured:
+ * Transports are selected by what's configured, in precedence order:
+ *  - "resend": Resend HTTPS API. Simplest; sends from a verified domain. No
+ *    SMTP ports, no OAuth. Highest precedence when set.
  *  - "gmail-api": Gmail API over HTTPS (OAuth2). Works where outbound SMTP is
- *    blocked (e.g. DigitalOcean). Preferred when its creds are present.
+ *    blocked (e.g. DigitalOcean); sends as the configured Gmail account.
  *  - "smtp": plain SMTP (nodemailer). Simple, but needs ports 465/587 open.
  * Apps branch on the injected EMAIL_PROVIDER var.
  */
 
-export type EmailProvider = "gmail-api" | "smtp";
+export type EmailProvider = "resend" | "gmail-api" | "smtp";
 
 export function emailProvider(): EmailProvider | null {
-  const { gmail, smtp } = loadConfig();
+  const { gmail, smtp, resend } = loadConfig();
+  if (resend.apiKey && resend.from) return "resend";
   if (gmail.clientId && gmail.clientSecret && gmail.refreshToken && (gmail.from || smtp.from)) {
     return "gmail-api";
   }
@@ -29,9 +32,18 @@ export function emailConfigured(): boolean {
 
 /** Email env vars injected into an app container when email is enabled. */
 export function emailEnvFor(): Record<string, string> | null {
-  const { gmail, smtp } = loadConfig();
+  const { gmail, smtp, resend } = loadConfig();
   const provider = emailProvider();
   if (!provider) return null;
+
+  if (provider === "resend") {
+    return {
+      EMAIL_PROVIDER: "resend",
+      EMAIL_FROM: resend.from,
+      RESEND_API_KEY: resend.apiKey,
+      RESEND_FROM: resend.from,
+    };
+  }
 
   if (provider === "gmail-api") {
     const from = gmail.from || smtp.from;

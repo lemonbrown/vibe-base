@@ -88,6 +88,8 @@ services:
       GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
       GMAIL_REFRESH_TOKEN: ${GMAIL_REFRESH_TOKEN:-}
       GMAIL_FROM: ${GMAIL_FROM:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM: ${RESEND_FROM:-}
     volumes:
       # The control plane builds and runs app containers via the host daemon.
       - /var/run/docker.sock:/var/run/docker.sock

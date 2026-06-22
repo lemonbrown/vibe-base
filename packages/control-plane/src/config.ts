@@ -87,6 +87,15 @@ export interface Config {
     /** Sender address; falls back to smtp.from when unset. */
     from: string;
   };
+  /**
+   * Resend (https://resend.com) for app email — HTTPS API, no SMTP ports.
+   * Sends from a domain verified in Resend. Highest precedence when set.
+   */
+  resend: {
+    apiKey: string;
+    /** Sender, e.g. "noreply@yourdomain.com" (must be a verified domain). */
+    from: string;
+  };
 }
 
 let cached: Config | null = null;
@@ -140,6 +149,10 @@ export function loadConfig(): Config {
       clientSecret: opt("GMAIL_CLIENT_SECRET", ""),
       refreshToken: opt("GMAIL_REFRESH_TOKEN", ""),
       from: opt("GMAIL_FROM", ""),
+    },
+    resend: {
+      apiKey: opt("RESEND_API_KEY", ""),
+      from: opt("RESEND_FROM", ""),
     },
   };
   return cached;

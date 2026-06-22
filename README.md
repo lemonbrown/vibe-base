@@ -39,16 +39,29 @@ subdomain, log in, read its state with an LLM*:
 - **LLM-readable project files** — `vibe.app.yaml`, `AGENTS.md`, `.vibe-memory/`.
 
 Apps can also send email: enable `capabilities.email` and the platform injects
-email env (a single shared sender configured on the control plane). Two
-transports are supported, chosen by what you configure — the control plane
-prefers the Gmail API when its creds are set:
+email env (a single shared sender configured on the control plane). Three
+transports are supported, chosen by what you configure. Precedence when several
+are set: **Resend > Gmail API > SMTP**.
 
-- **Gmail API (recommended)** — sends over HTTPS, so it works even where
+- **Resend (recommended)** — HTTPS API, no SMTP ports, no OAuth. Sends from a
+  domain you verify in Resend.
+- **Gmail API** — sends over HTTPS as your Gmail account; works even where
   outbound SMTP is blocked (DigitalOcean blocks ports 25/465/587 by default).
 - **SMTP** — simple nodemailer, but needs those ports open.
 
-Apps branch on the injected `EMAIL_PROVIDER` (`gmail-api` | `smtp`) and send as
-`EMAIL_FROM`.
+Apps branch on the injected `EMAIL_PROVIDER` (`resend` | `gmail-api` | `smtp`)
+and send as `EMAIL_FROM`.
+
+### Resend setup
+
+1. Create an account at https://resend.com.
+2. **Domains → Add domain** → add `yourdomain.com` and create the DNS records it
+   shows (SPF/DKIM) at your registrar. Wait for it to verify.
+3. **API Keys → Create** → copy the key.
+4. In the control plane's `.env`, set `RESEND_API_KEY=re_...` and
+   `RESEND_FROM=noreply@yourdomain.com`, then `docker compose up -d`. (For a
+   quick test without a verified domain, Resend lets you send from
+   `onboarding@resend.dev` to your own account email.)
 
 ### Gmail API setup (one-time, to get a refresh token)
 
