@@ -1,4 +1,5 @@
-import { basename } from "node:path";
+import { access, readFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { parseManifest, type Manifest } from "@vibe/shared";
@@ -19,6 +20,29 @@ function log(s = ""): void {
 
 const rel = (dir: string, p: string) =>
   p.replace(dir + "/", "").replace(dir + "\\", "");
+
+async function fileExists(p: string): Promise<boolean> {
+  try {
+    await access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+interface PackageJson {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  scripts?: Record<string, string>;
+}
+
+async function readPackageJson(dir: string): Promise<PackageJson | null> {
+  try {
+    return JSON.parse(await readFile(join(dir, "package.json"), "utf8")) as PackageJson;
+  } catch {
+    return null;
+  }
+}
 
 /** Derive a GitHub SSH remote from an HTTPS clone URL. */
 function toSshUrl(httpsUrl: string): string | undefined {
@@ -238,10 +262,46 @@ export async function cmdDoctor(): Promise<void> {
     const m = await loadManifest(cwd());
     oks.push(`manifest valid (${m.id})`);
     if (!m.runtime.healthPath) issues.push("runtime.healthPath is empty");
-    if (m.runtime.adapter === "custom-dockerfile" && !m.runtime.dockerfile)
-      oks.push("custom-dockerfile: expecting ./Dockerfile");
     if (m.capabilities.database && !m.database?.migrations)
       issues.push("database enabled but no migrations command set (database.migrations)");
+
+    // Build path: a custom-dockerfile app must actually ship a Dockerfile, or
+    // the deploy fails with "Dockerfile not found".
+    if (m.runtime.adapter === "custom-dockerfile") {
+      const df = m.runtime.dockerfile ?? "Dockerfile";
+      if (await fileExists(join(cwd(), df))) oks.push(`Dockerfile present (${df})`);
+      else
+        issues.push(
+          `adapter is custom-dockerfile but '${df}' is missing — the deploy will fail without it`
+        );
+    }
+
+    const pkg = await readPackageJson(cwd());
+    const deps = pkg ? { ...pkg.dependencies, ...pkg.devDependencies } : {};
+
+    // A Node app the platform builds needs a way to start.
+    if (
+      m.runtime.adapter.startsWith("node-") &&
+      m.runtime.adapter !== "static-site" &&
+      !m.runtime.startCommand &&
+      !pkg?.scripts?.start
+    ) {
+      issues.push(
+        "no start command — set runtime.startCommand or add a \"start\" script, or the container won't know how to launch"
+      );
+    }
+
+    // Email capability vs installed packages: catch the trap where an email
+    // library is present but capabilities.email is off, so the platform never
+    // injects EMAIL_PROVIDER / the provider credentials.
+    const emailPkgs = ["resend", "nodemailer", "googleapis", "@sendgrid/mail"].filter(
+      (d) => d in deps
+    );
+    if (emailPkgs.length && !m.capabilities.email)
+      issues.push(
+        `email package(s) installed (${emailPkgs.join(", ")}) but capabilities.email is false — ` +
+          "set it true so the platform injects EMAIL_* / provider credentials"
+      );
   } catch (e) {
     issues.push(`manifest invalid: ${(e as Error).message}`);
   }
