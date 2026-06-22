@@ -79,6 +79,28 @@ Deploying (GitHub is the default path):
   also shows rollout state.
 `;
 
+// Pointer files so each coding agent loads the same instructions. AGENTS.md is
+// the single source of truth; Codex reads it natively. Claude Code (CLAUDE.md)
+// and Gemini CLI (GEMINI.md) both support \`@\`-imports, so these pull AGENTS.md
+// in rather than duplicating it.
+const CLAUDE_MD = `# Project guidance for Claude
+
+The authoritative instructions for this app are in **AGENTS.md** — read it first
+and follow it. It explains how this app uses Vibe Base (deploy via git push,
+platform auth, environment variables, email, etc.).
+
+@AGENTS.md
+`;
+
+const GEMINI_MD = `# Project guidance for Gemini
+
+The authoritative instructions for this app are in **AGENTS.md** — read it first
+and follow it. It explains how this app uses Vibe Base (deploy via git push,
+platform auth, environment variables, email, etc.).
+
+@AGENTS.md
+`;
+
 function overviewMd(m: Manifest): string {
   return `# Overview
 
@@ -239,6 +261,8 @@ export async function scaffold(cwd: string, m: Manifest): Promise<ScaffoldResult
 
   const writes: Array<[string, string]> = [
     [join(cwd, "AGENTS.md"), AGENTS_MD],
+    [join(cwd, "CLAUDE.md"), CLAUDE_MD],
+    [join(cwd, "GEMINI.md"), GEMINI_MD],
     [join(cwd, ".env.example"), envExample(m)],
     [join(memDir, "overview.md"), overviewMd(m)],
     [join(memDir, "runtime.md"), runtimeMd(m)],
