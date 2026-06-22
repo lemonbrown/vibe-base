@@ -1,0 +1,19 @@
+{
+  "name": "vibe-base",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vibe Base — local-first base layer for LLM-built personal apps.",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "tsc -b",
+    "dev:control-plane": "npm run dev --workspace @vibe/control-plane",
+    "cli": "npm run --silent start --workspace @vibe/cli --"
+  }
+}

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.local
+# Local-only: publishes the control-plane port for the CLI. Never on prod.
+docker-compose.override.yml
+*.log
+.DS_Store
+.vibe/state.json
+.vibe/credentials.json
+data/
+tmp/

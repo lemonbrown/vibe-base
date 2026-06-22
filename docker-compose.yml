@@ -1,0 +1,90 @@
+# Vibe Base — single-VPS control plane.
+# Everything runs on one user-defined network ("vibe") so the control plane,
+# Postgres, MinIO, Caddy, and the app containers it launches can reach each
+# other by name.
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vibe
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vibe-dev}
+      POSTGRES_DB: vibe
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [vibe]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vibe"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-vibe}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-vibe-secret}
+    volumes:
+      - miniodata:/data
+    networks: [vibe]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    command: caddy run --config /etc/caddy/caddy.json
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/caddy.json:/etc/caddy/caddy.json:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    networks: [vibe]
+
+  control-plane:
+    build:
+      context: .
+      dockerfile: packages/control-plane/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "8080"
+      DATABASE_URL: postgres://vibe:${POSTGRES_PASSWORD:-vibe-dev}@postgres:5432/vibe
+      APPS_DOMAIN: ${APPS_DOMAIN}
+      CONTROL_PLANE_DOMAIN: ${CONTROL_PLANE_DOMAIN}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN}
+      OWNER_EMAIL: ${OWNER_EMAIL}
+      OWNER_TOKEN: ${OWNER_TOKEN}
+      OWNER_PASSWORD: ${OWNER_PASSWORD:-}
+      SESSION_SECRET: ${SESSION_SECRET}
+      CADDY_ADMIN: http://caddy:2019
+      TLS_MODE: ${TLS_MODE:-acme}
+      CP_UPSTREAM: control-plane:8080
+      DOCKER_NETWORK: vibe
+      PG_HOST_FOR_APPS: postgres
+      DATA_DIR: /var/lib/vibe
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://localhost:9000}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-vibe}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-vibe-secret}
+    volumes:
+      # The control plane builds and runs app containers via the host daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - vibedata:/var/lib/vibe
+    networks: [vibe]
+
+volumes:
+  pgdata:
+  miniodata:
+  caddydata:
+  caddyconfig:
+  vibedata:
+
+networks:
+  vibe:
+    name: vibe

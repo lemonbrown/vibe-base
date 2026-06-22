@@ -1,0 +1,100 @@
+import { z } from "zod";
+
+/**
+ * vibe.app.yaml — the single source of truth for an app.
+ *
+ * MVP keeps the surface small but forward-compatible with the full spec:
+ * fields the engine does not act on yet (backups, scheduledJobs, actions)
+ * are accepted and preserved, but only the marked-active capabilities are
+ * provisioned by `vibe apply` / `vibe deploy`.
+ */
+
+export const VisibilitySchema = z.enum(["private", "unlisted", "public"]);
+
+export const AccessModeSchema = z.enum(["invite-only", "owner-only", "open"]);
+
+export const RuntimeSchema = z.object({
+  type: z.literal("container").default("container"),
+  /** Runtime adapter id, e.g. "node-next", "custom-dockerfile". */
+  adapter: z.string().default("custom-dockerfile"),
+  framework: z.string().optional(),
+  language: z.string().optional(),
+  packageManager: z.string().optional(),
+  /** Port the container listens on. The platform always injects $PORT too. */
+  port: z.number().int().positive().default(3000),
+  healthPath: z.string().default("/health"),
+  buildCommand: z.string().optional(),
+  startCommand: z.string().optional(),
+  /** Path to a Dockerfile when adapter = custom-dockerfile. */
+  dockerfile: z.string().optional(),
+});
+
+export const CapabilitiesSchema = z.object({
+  auth: z.boolean().default(true),
+  database: z.boolean().default(false),
+  storage: z.boolean().default(false),
+  email: z.boolean().default(false),
+  scheduledJobs: z.boolean().default(false),
+  actions: z.boolean().default(false),
+});
+
+export const DatabaseSchema = z.object({
+  engine: z.literal("postgres").default("postgres"),
+  /** Command run inside the container after build to apply migrations. */
+  migrations: z.string().optional(),
+  seed: z.string().optional(),
+});
+
+export const StorageSchema = z.object({
+  enabled: z.boolean().default(false),
+});
+
+export const EmailSchema = z.object({
+  enabled: z.boolean().default(false),
+  provider: z.string().default("platform"),
+});
+
+export const DomainSchema = z.object({
+  /** Subdomain under the platform wildcard, e.g. "bible-study-app". */
+  subdomain: z.string(),
+  customDomains: z.array(z.string()).default([]),
+});
+
+export const AccessSchema = z.object({
+  mode: AccessModeSchema.default("invite-only"),
+  defaultRole: z.string().default("member"),
+  ownerRole: z.string().default("owner"),
+});
+
+export const ManifestSchema = z.object({
+  id: z
+    .string()
+    .min(1)
+    .regex(/^[a-z0-9][a-z0-9-]*$/, "id must be lowercase alphanumeric/dashes"),
+  name: z.string().min(1),
+  description: z.string().default(""),
+  visibility: VisibilitySchema.default("private"),
+  access: AccessSchema.default({}),
+  runtime: RuntimeSchema.default({}),
+  capabilities: CapabilitiesSchema.default({}),
+  database: DatabaseSchema.optional(),
+  storage: StorageSchema.optional(),
+  email: EmailSchema.optional(),
+  domain: DomainSchema,
+  roles: z.array(z.string()).default(["owner", "member"]),
+});
+
+export type Manifest = z.infer<typeof ManifestSchema>;
+export type Runtime = z.infer<typeof RuntimeSchema>;
+export type Capabilities = z.infer<typeof CapabilitiesSchema>;
+export type AccessMode = z.infer<typeof AccessModeSchema>;
+
+/** Parse + apply defaults. Throws a ZodError with readable issues on failure. */
+export function parseManifest(input: unknown): Manifest {
+  return ManifestSchema.parse(input);
+}
+
+/** Safe parse variant returning the discriminated result. */
+export function safeParseManifest(input: unknown) {
+  return ManifestSchema.safeParse(input);
+}

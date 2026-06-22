@@ -1,0 +1,152 @@
+import { getPool } from "./db.js";
+
+interface Migration {
+  id: string;
+  sql: string;
+}
+
+/**
+ * Forward-only migrations. Each runs once, recorded in schema_migrations.
+ * Keep them additive; the MVP never auto-drops platform tables.
+ */
+const MIGRATIONS: Migration[] = [
+  {
+    id: "0001_init",
+    sql: `
+      CREATE TABLE IF NOT EXISTS apps (
+        id                    TEXT PRIMARY KEY,
+        name                  TEXT NOT NULL,
+        description           TEXT NOT NULL DEFAULT '',
+        visibility            TEXT NOT NULL DEFAULT 'private',
+        access_mode           TEXT NOT NULL DEFAULT 'invite-only',
+        default_role          TEXT NOT NULL DEFAULT 'member',
+        subdomain             TEXT NOT NULL UNIQUE,
+        manifest              JSONB NOT NULL,
+        status                TEXT NOT NULL DEFAULT 'registered',
+        current_deployment_id TEXT,
+        created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS deployments (
+        id                TEXT PRIMARY KEY,
+        app_id            TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+        status            TEXT NOT NULL DEFAULT 'queued',
+        image_tag         TEXT,
+        container_name    TEXT,
+        port              INTEGER,
+        health            TEXT NOT NULL DEFAULT 'unknown',
+        error             TEXT,
+        build_log         TEXT NOT NULL DEFAULT '',
+        rollback_target   TEXT,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+        completed_at      TIMESTAMPTZ
+      );
+      CREATE INDEX IF NOT EXISTS deployments_app_idx ON deployments(app_id, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS db_provisions (
+        app_id      TEXT PRIMARY KEY REFERENCES apps(id) ON DELETE CASCADE,
+        db_name     TEXT NOT NULL,
+        db_user     TEXT NOT NULL,
+        db_password TEXT NOT NULL,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS storage_provisions (
+        app_id     TEXT PRIMARY KEY REFERENCES apps(id) ON DELETE CASCADE,
+        bucket     TEXT NOT NULL,
+        prefix     TEXT NOT NULL,
+        access_key TEXT NOT NULL,
+        secret_key TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS env_vars (
+        app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+        key    TEXT NOT NULL,
+        value  TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'user',
+        PRIMARY KEY (app_id, key)
+      );
+
+      CREATE TABLE IF NOT EXISTS users (
+        email         TEXT PRIMARY KEY,
+        role          TEXT NOT NULL DEFAULT 'member',
+        password_hash TEXT,
+        status        TEXT NOT NULL DEFAULT 'active',
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS app_members (
+        app_id     TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+        email      TEXT NOT NULL,
+        role       TEXT NOT NULL DEFAULT 'member',
+        status     TEXT NOT NULL DEFAULT 'invited',
+        invited_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (app_id, email)
+      );
+
+      CREATE TABLE IF NOT EXISTS invites (
+        token      TEXT PRIMARY KEY,
+        app_id     TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+        email      TEXT NOT NULL,
+        role       TEXT NOT NULL DEFAULT 'member',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at TIMESTAMPTZ NOT NULL,
+        claimed_at TIMESTAMPTZ
+      );
+
+      CREATE TABLE IF NOT EXISTS sessions (
+        id         TEXT PRIMARY KEY,
+        email      TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at TIMESTAMPTZ NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS audit_events (
+        id          TEXT PRIMARY KEY,
+        actor_email TEXT,
+        actor_kind  TEXT NOT NULL DEFAULT 'user',
+        action      TEXT NOT NULL,
+        app_id      TEXT,
+        detail      JSONB NOT NULL DEFAULT '{}'::jsonb,
+        success     BOOLEAN NOT NULL DEFAULT true,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `,
+  },
+];
+
+export async function runMigrations(): Promise<void> {
+  const pool = getPool();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id         TEXT PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  for (const m of MIGRATIONS) {
+    const { rowCount } = await pool.query(
+      "SELECT 1 FROM schema_migrations WHERE id = $1",
+      [m.id]
+    );
+    if (rowCount) continue;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(m.sql);
+      await client.query("INSERT INTO schema_migrations (id) VALUES ($1)", [
+        m.id,
+      ]);
+      await client.query("COMMIT");
+      // eslint-disable-next-line no-console
+      console.log(`[migrate] applied ${m.id}`);
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+}

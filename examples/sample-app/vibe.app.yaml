@@ -1,0 +1,28 @@
+id: sample-app
+name: Vibe Sample App
+description: Minimal app proving the Vibe Base spine — deploy, gateway auth, health.
+visibility: private
+access:
+  mode: invite-only
+  defaultRole: member
+  ownerRole: owner
+runtime:
+  type: container
+  adapter: node-express
+  language: javascript
+  packageManager: npm
+  port: 3000
+  healthPath: /health
+  startCommand: npm run start
+capabilities:
+  auth: true
+  database: false
+  storage: false
+  email: false
+  scheduledJobs: false
+  actions: false
+domain:
+  subdomain: sample-app
+roles:
+  - owner
+  - member
