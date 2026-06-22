@@ -61,18 +61,13 @@ Deploying (GitHub is the default path):
   \`vibe login --url <url> --token <token>\`. Never invent credentials. Pushing to
   GitHub also needs the user's local git auth (e.g. \`gh auth login\`). Run
   \`vibe doctor\` to check both before deploying.
-- **You (the agent) run these commands yourself** — do not print the steps and
-  ask the user to run them. The point of Vibe Base is that you deploy the app,
-  not the user. The only thing you escalate is missing credentials (above).
-- If this app isn't connected to GitHub yet, run \`vibe init --github\` (new
-  project) or \`vibe github connect\` (existing one), then commit and push — do
-  this end to end without pausing:
-    vibe github connect            # skip if a git remote already exists
-    git add -A && git commit -m "<message>"
-    git push origin main
-- After that, **deploy by committing and pushing to \`main\`.** GitHub Actions
-  builds the image and the platform rolls it out — do not run \`vibe deploy\` for
-  normal changes.
+- **To deploy, run \`vibe ship\`. That's the whole thing — one command.** It
+  connects the app to GitHub on first run (creates the repo + CI and pushes) and
+  commits + pushes on every run after, triggering the build and rollout.
+- **You (the agent) run \`vibe ship\` yourself** once the app is ready — do not
+  print deploy steps for the user to run. Deploying the app is your job, not the
+  user's. The only thing you escalate is missing credentials (above).
+- Redeploy after any change by running \`vibe ship\` again.
 - The repo's \`Dockerfile\` defines the build; keep it working. (\`custom-dockerfile\`
   apps own theirs; others get one generated from \`vibe.app.yaml\`.)
 - Check progress with \`vibe status\` / \`vibe logs\`; the repo's Deployments tab
@@ -146,13 +141,10 @@ ${m.capabilities.email ? "- `EMAIL_PROVIDER` (`resend` | `gmail-api` | `smtp`) +
 const RUNBOOK_MD = `# Runbook
 
 ## Deploy
-This app deploys through GitHub Actions. Push to \`main\` to ship:
-\`git push\` → CI builds + pushes an image to GHCR → the platform pulls it, runs
-migrations, health-checks, then flips the proxy to the new version. Rollout
-state shows up in the repo's Deployments tab.
-
-First-time setup: \`vibe init --github\` (new project) or \`vibe github connect\`
-(existing one) creates the repo and wires up CI.
+\`vibe ship\` — one command. First run connects the app to GitHub (repo + CI) and
+pushes; later runs commit + push. Either way GitHub Actions builds the image,
+the platform pulls it, runs migrations, health-checks, and flips the proxy to
+the new version. Rollout state shows up in the repo's Actions / Deployments tab.
 
 Manual / no-GitHub fallbacks:
 - \`vibe deploy\` — build the context on the VPS instead of via CI.

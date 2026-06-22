@@ -12,6 +12,7 @@ import {
   cmdLogin,
   cmdLogs,
   cmdOpen,
+  cmdShip,
   cmdRollback,
   cmdStatus,
   handleError,
@@ -51,6 +52,12 @@ program
 
 program.command("detect").description("Show detected runtime").action(wrap(cmdDetect));
 program.command("doctor").description("Check the project for problems").action(wrap(cmdDoctor));
+
+program
+  .command("ship")
+  .description("Deploy: connect to GitHub on first run, then commit + push (one command)")
+  .option("-m, --message <message>", "commit message")
+  .action(wrap((opts: { message?: string }) => cmdShip(opts)));
 
 program
   .command("deploy")

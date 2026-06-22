@@ -226,8 +226,8 @@ export async function cmdInit(opts: {
     await connectGithub(dir, manifest, { private: opts.private });
   } else {
     log(
-      "\nNext: review vibe.app.yaml, then run `vibe init --github` to create a" +
-        "\nGitHub repo and deploy via GitHub (or `vibe deploy` to build on the VPS)."
+      "\nNext: review vibe.app.yaml, build the app, then run `vibe ship` to" +
+        "\ndeploy (it creates the GitHub repo + CI on first run)."
     );
   }
 }
@@ -240,6 +240,56 @@ export async function cmdGithubConnect(opts: {
   const dir = cwd();
   const manifest = await loadManifest(dir);
   await connectGithub(dir, manifest, { private: opts.private });
+}
+
+/* -------------------------------- ship -------------------------------- */
+
+/**
+ * One-command deploy. On first run it connects the app to GitHub (creates the
+ * repo + CI and pushes); on later runs it commits and pushes, which triggers
+ * the GitHub Actions build + rollout. This is the single verb agents should
+ * run to deploy — no multi-step ritual to remember or skip.
+ */
+export async function cmdShip(opts: { message?: string } = {}): Promise<void> {
+  const dir = cwd();
+  const manifest = await loadManifest(dir);
+
+  if (!(await hasCredentials())) {
+    throw new Error(
+      "Not logged in to the control plane. Ask the user for their Vibe Base " +
+        "control-plane URL and owner token, then run:\n" +
+        "  vibe login --url <control-plane-url> --token <owner-token>\n" +
+        "Do not fabricate these values."
+    );
+  }
+  await ensureGitRepo(dir);
+
+  // First ship: no remote yet → full GitHub connect (repo + CI + push).
+  if (!(await git(["remote", "get-url", "origin"], dir)).ok) {
+    await connectGithub(dir, manifest, {});
+    return;
+  }
+
+  // Subsequent ships: commit any changes and push to trigger CI.
+  await git(["add", "-A"], dir);
+  const commit = await git(["commit", "-m", opts.message ?? "Update (vibe ship)"], dir);
+  if (!commit.ok && /nothing to commit/i.test(commit.out)) {
+    log("No changes since the last ship; pushing anyway to ensure it's deployed.");
+  }
+  const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir)).out || "main";
+  log(`Pushing to origin/${branch}…`);
+  const push = await git(["push", "origin", branch], dir);
+  if (!push.ok) {
+    log("\n⚠ Push failed:");
+    log(push.out.split("\n").slice(-6).join("\n"));
+    log("\nIf this is a git auth problem, set up git auth (e.g. `gh auth login`) and retry.");
+    process.exitCode = 1;
+    return;
+  }
+  log(
+    "\n✓ Pushed. GitHub Actions is building and rolling out the new version." +
+      "\nWatch it with `vibe status` or the repo's Actions / Deployments tab."
+  );
 }
 
 /* ------------------------------- detect ------------------------------- */
