@@ -39,7 +39,40 @@ subdomain, log in, read its state with an LLM*:
 - **LLM-readable project files** — `vibe.app.yaml`, `AGENTS.md`, `.vibe-memory/`.
 
 Apps can also send email: enable `capabilities.email` and the platform injects
-`SMTP_*` env (a single shared sender configured on the control plane).
+email env (a single shared sender configured on the control plane). Two
+transports are supported, chosen by what you configure — the control plane
+prefers the Gmail API when its creds are set:
+
+- **Gmail API (recommended)** — sends over HTTPS, so it works even where
+  outbound SMTP is blocked (DigitalOcean blocks ports 25/465/587 by default).
+- **SMTP** — simple nodemailer, but needs those ports open.
+
+Apps branch on the injected `EMAIL_PROVIDER` (`gmail-api` | `smtp`) and send as
+`EMAIL_FROM`.
+
+### Gmail API setup (one-time, to get a refresh token)
+
+1. **Google Cloud** → create/pick a project → **APIs & Services → Library** →
+   enable **Gmail API**.
+2. **OAuth consent screen** → External → add your Gmail as a **Test user** →
+   add scope `https://www.googleapis.com/auth/gmail.send`.
+3. **Credentials → Create credentials → OAuth client ID → Web application**.
+   Add `https://developers.google.com/oauthplayground` as an authorized redirect
+   URI. Note the **client ID** and **client secret**.
+4. Go to **https://developers.google.com/oauthplayground** → gear icon → check
+   "Use your own OAuth credentials" → paste the client ID/secret. In the left
+   panel enter scope `https://www.googleapis.com/auth/gmail.send` → **Authorize**
+   → consent as your Gmail → **Exchange authorization code for tokens**. Copy the
+   **refresh token**.
+5. Put them in the control plane's `.env`:
+   ```
+   GMAIL_CLIENT_ID=...
+   GMAIL_CLIENT_SECRET=...
+   GMAIL_REFRESH_TOKEN=...
+   GMAIL_FROM=you@gmail.com
+   ```
+   then `docker compose up -d`. Apps with `capabilities.email` get these next
+   deploy.
 
 Deferred (post-MVP, per the spec): backups/restore, app actions + MCP server,
 scheduled jobs, custom domains, memory-staleness enforcement.

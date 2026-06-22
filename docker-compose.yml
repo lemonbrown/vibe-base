@@ -84,6 +84,10 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_SECURE: ${SMTP_SECURE:-false}
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:-}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:-}
+      GMAIL_REFRESH_TOKEN: ${GMAIL_REFRESH_TOKEN:-}
+      GMAIL_FROM: ${GMAIL_FROM:-}
     volumes:
       # The control plane builds and runs app containers via the host daemon.
       - /var/run/docker.sock:/var/run/docker.sock

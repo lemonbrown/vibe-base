@@ -76,6 +76,17 @@ export interface Config {
     /** true for implicit TLS (port 465); false for STARTTLS (port 587). */
     secure: boolean;
   };
+  /**
+   * Gmail API (OAuth2) for app email — sends over HTTPS, so it works where
+   * outbound SMTP is blocked (e.g. DigitalOcean). Preferred over smtp when set.
+   */
+  gmail: {
+    clientId: string;
+    clientSecret: string;
+    refreshToken: string;
+    /** Sender address; falls back to smtp.from when unset. */
+    from: string;
+  };
 }
 
 let cached: Config | null = null;
@@ -123,6 +134,12 @@ export function loadConfig(): Config {
       pass: opt("SMTP_PASS", ""),
       from: opt("SMTP_FROM", ""),
       secure: opt("SMTP_SECURE", "false") === "true",
+    },
+    gmail: {
+      clientId: opt("GMAIL_CLIENT_ID", ""),
+      clientSecret: opt("GMAIL_CLIENT_SECRET", ""),
+      refreshToken: opt("GMAIL_REFRESH_TOKEN", ""),
+      from: opt("GMAIL_FROM", ""),
     },
   };
   return cached;

@@ -39,10 +39,14 @@ Rules:
   Your app receives the signed-in user via request headers:
   \`X-Vibe-User-Email\` and \`X-Vibe-User-Role\`. Trust them; do not add a login UI.
 - Read config from environment variables. Never hardcode secrets.
-- Use \`DATABASE_URL\` for Postgres, the \`S3_*\` vars for storage, and the
-  \`SMTP_*\` vars for email — only when that capability is enabled. For email,
-  send with a standard SMTP client (e.g. nodemailer) using \`SMTP_FROM\` as the
-  sender; do not wire up your own email provider.
+- Use \`DATABASE_URL\` for Postgres and the \`S3_*\` vars for storage — only when
+  that capability is enabled. Never wire up your own provider for these.
+- For email (when \`capabilities.email\` is on), branch on \`EMAIL_PROVIDER\` and
+  send as \`EMAIL_FROM\`; do not configure your own email service:
+  - \`gmail-api\`: use the \`googleapis\` package with \`GMAIL_CLIENT_ID\`,
+    \`GMAIL_CLIENT_SECRET\`, \`GMAIL_REFRESH_TOKEN\` (OAuth2) to call the Gmail API
+    over HTTPS. Prefer this — it works even where outbound SMTP is blocked.
+  - \`smtp\`: use \`nodemailer\` with \`SMTP_HOST/PORT/USER/PASS/SECURE\`.
 - Expose a health endpoint at the path in \`vibe.app.yaml\` (runtime.healthPath).
 - Keep \`.vibe-memory/\` up to date after meaningful changes.
 - A \`.gitignore\` is scaffolded for you. **Never commit \`.env\` or secrets**, and
@@ -109,7 +113,7 @@ ${m.database?.migrations ? `- Migrations: ${m.database.migrations}` : ""}
 - \`VIBE_APP_ID\`, \`VIBE_APP_NAME\`.
 ${m.capabilities.database ? "- `DATABASE_URL` — Postgres connection string." : ""}
 ${m.capabilities.storage ? "- `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`, `S3_FORCE_PATH_STYLE`." : ""}
-${m.capabilities.email ? "- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_SECURE` — send mail with nodemailer; from-address is fixed to `SMTP_FROM`." : ""}
+${m.capabilities.email ? "- `EMAIL_PROVIDER` (`gmail-api` or `smtp`) + `EMAIL_FROM`. For `gmail-api`: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` (send via the `googleapis` Gmail API over HTTPS). For `smtp`: `SMTP_HOST/PORT/USER/PASS/SECURE` (nodemailer)." : ""}
 - \`X-Vibe-User-Email\` / \`X-Vibe-User-Role\` request headers (gateway auth).
 `;
 }
@@ -263,7 +267,9 @@ function envExample(m: Manifest): string {
   if (m.capabilities.storage)
     lines.push("# S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY");
   if (m.capabilities.email)
-    lines.push("# SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, SMTP_SECURE");
+    lines.push(
+      "# EMAIL_PROVIDER, EMAIL_FROM (+ GMAIL_* for gmail-api, or SMTP_* for smtp)"
+    );
   lines.push("", "# Your app's own variables go below (set with `vibe env set`):");
   return lines.join("\n") + "\n";
 }
