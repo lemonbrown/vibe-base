@@ -447,7 +447,7 @@ async function runClaude(
 function extractCodexSessionId(value: unknown): string | undefined {
   if (!value || typeof value !== "object") return undefined;
   const obj = value as Record<string, unknown>;
-  for (const key of ["session_id", "sessionId", "conversation_id", "conversationId"]) {
+  for (const key of ["thread_id", "session_id", "sessionId", "conversation_id", "conversationId"]) {
     if (typeof obj[key] === "string") return obj[key];
   }
   if (typeof obj.type === "string" && obj.type.toLowerCase().includes("session")) {
@@ -500,13 +500,31 @@ async function runCodex(
       const rl = createInterface({ input: child.stdout });
       rl.on("line", (line) => {
         try {
-          const obj = JSON.parse(line) as unknown;
+          const obj = JSON.parse(line) as Record<string, unknown>;
           sessionId = extractCodexSessionId(obj) ?? sessionId;
-          const type =
-            typeof obj === "object" && obj && "type" in obj
-              ? String((obj as { type?: unknown }).type)
-              : "";
-          if (type) enqueue([{ seq: 0, type: "status", data: { provider: "codex", event: type } }]);
+          const type = typeof obj.type === "string" ? obj.type : "";
+          if (!type) return;
+
+          if (type === "item.completed") {
+            const item = obj.item as Record<string, unknown> | undefined;
+            if (!item) return;
+            const itemType = typeof item.type === "string" ? item.type : "";
+            if (itemType === "agent_message" && typeof item.text === "string" && item.text) {
+              // The full assistant response text for this turn.
+              enqueue([{ seq: 0, type: "text", data: { text: item.text } }]);
+            } else if (itemType === "function_call") {
+              const name = typeof item.name === "string" ? item.name : "tool";
+              enqueue([{ seq: 0, type: "tool", data: { name } }]);
+            } else if (itemType === "function_call_output") {
+              const output = typeof item.output === "string" ? item.output : "";
+              const progress = extractProgressLine(output);
+              if (progress) enqueue([{ seq: 0, type: "status", data: { phase: "tool_result", output: progress } }]);
+            }
+          } else if (type === "turn.started") {
+            enqueue([{ seq: 0, type: "status", data: { phase: "init" } }]);
+          }
+          // All other event types (thread.started, turn.completed, etc.) are lifecycle
+          // noise — don't surface them in the portal.
         } catch {
           /* Ignore non-JSON defensive noise. */
         }
