@@ -166,6 +166,22 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ jobId, userMessageId: userMsgId, assistantMessageId: asstMsgId });
   });
 
+  // Cancel the latest in-flight job for a conversation (sets status → 'cancelling').
+  // The daemon polls for this and kills its child process.
+  app.post<{ Params: { id: string } }>("/api/chat/:id/stop", async (req, reply) => {
+    const actor = await requireUser(req, reply);
+    if (!actor) return;
+    const conv = await ownedConv(actor.email, req.params.id);
+    if (!conv) return reply.code(404).send({ error: "conversation not found" });
+    const job = await one<{ id: string }>(
+      "SELECT id FROM jobs WHERE conv_id = $1 AND status NOT IN ('done','failed','stopped','cancelling') ORDER BY created_at DESC LIMIT 1",
+      [req.params.id]
+    );
+    if (!job) return reply.send({ ok: true, jobId: null });
+    await query("UPDATE jobs SET status = 'cancelling' WHERE id = $1", [job.id]);
+    return reply.send({ ok: true, jobId: job.id });
+  });
+
   // SSE: stream the latest job's events as the daemon produces them. Clients may
   // pass ?from=<seq> to resume after a reconnect.
   app.get<{ Params: { id: string }; Querystring: { from?: string } }>(

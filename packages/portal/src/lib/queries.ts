@@ -140,3 +140,9 @@ export function useSendMessage(convId: string) {
     }) => api.sendMessage(convId, v),
   });
 }
+
+export function useStopConversation(convId: string) {
+  return useMutation({
+    mutationFn: () => api.stopConversation(convId),
+  });
+}

@@ -6,15 +6,21 @@ import { Toggle } from "./ui";
 
 export function Composer({
   sending,
+  streaming,
+  stopping,
   onSend,
+  onStop,
 }: {
   sending: boolean;
+  streaming?: boolean;
+  stopping?: boolean;
   onSend: (
     content: string,
     kind: JobKind,
     targetApp: string | null,
     planMode: boolean
   ) => void;
+  onStop?: () => void;
 }) {
   const { data: settings } = useSettings();
   const [text, setText] = useState("");
@@ -27,7 +33,7 @@ export function Composer({
     if (settings && !planTouched.current) setPlan(settings.planModeDefault);
   }, [settings]);
 
-  const canSend = !!text.trim() && !sending;
+  const canSend = !!text.trim() && !sending && !streaming;
   const policyActive = !!settings?.stackPolicy.trim();
 
   const submit = () => {
@@ -97,9 +103,19 @@ export function Composer({
             }
           }}
         />
-        <button className="btn-primary h-11 px-5" disabled={!canSend} onClick={submit}>
-          {sending ? "…" : "Send"}
-        </button>
+        {streaming && onStop ? (
+          <button
+            className="h-11 px-5 rounded-xl border border-[var(--color-bad)] text-[var(--color-bad)] text-sm font-medium transition-opacity hover:opacity-80 disabled:opacity-40"
+            disabled={stopping}
+            onClick={onStop}
+          >
+            {stopping ? "Stopping…" : "Stop"}
+          </button>
+        ) : (
+          <button className="btn-primary h-11 px-5" disabled={!canSend} onClick={submit}>
+            {sending ? "…" : "Send"}
+          </button>
+        )}
       </div>
     </div>
   );

@@ -160,13 +160,16 @@ export const api = {
   completeJob: (
     jobId: string,
     body: {
-      status: "done" | "failed";
+      status: "done" | "failed" | "stopped";
       error?: string;
       llmSessionId?: string;
       llmProvider?: string;
       finalText?: string;
     }
   ) => call<{ ok: boolean }>("POST", `/api/agent/jobs/${jobId}/complete`, { body }),
+
+  checkJobCancelled: (jobId: string) =>
+    call<{ status: string; cancelling: boolean }>("GET", `/api/agent/jobs/${jobId}/status`),
 
   completeVerifyJob: (
     jobId: string,

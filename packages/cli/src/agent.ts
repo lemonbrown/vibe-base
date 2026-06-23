@@ -41,6 +41,31 @@ export interface ParsedLine {
 }
 
 /**
+ * Pick the most informative single line from raw tool output for display.
+ * Prefers Docker "Step N/M" lines; skips registry noise and short lines.
+ * Returns "" when there's nothing worth showing.
+ */
+export function extractProgressLine(output: string): string {
+  if (!output || output.length < 10) return "";
+  const lines = output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return "";
+
+  // Docker step headers are the most useful progress signal
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^Step \d+\/\d+\b/.test(lines[i])) return lines[i].slice(0, 140);
+  }
+
+  // Skip registry pull noise, sha256 digests, and very short tokens
+  const noise =
+    /^(#\d+\b|sha256:|---> |Successfully built|Successfully tagged|Removing intermediate|CACHED\b|digest:|status:|Pulling from|Waiting|Verifying Checksum|Downloading|Extracting|Pull complete)/i;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!noise.test(lines[i]) && lines[i].length > 4) return lines[i].slice(0, 140);
+  }
+
+  return lines[lines.length - 1].slice(0, 140);
+}
+
+/**
  * Parse one line of `claude --output-format stream-json`. Defensive: unknown or
  * malformed lines yield null rather than throwing, so a CLI format change never
  * crashes the daemon. `seq` is a placeholder (0) - the control plane assigns the
@@ -76,6 +101,27 @@ export function parseStreamLine(line: string): ParsedLine | null {
         events.push({ seq: 0, type: "tool", data: { name: block.name, input: block.input } });
       }
     }
+  } else if (type === "user" && obj.message) {
+    // Tool results arrive as user messages with tool_result content blocks.
+    // Extract a progress line so the portal can show what each tool produced.
+    const content = (obj.message as { content?: unknown[] }).content ?? [];
+    for (const raw of content) {
+      const block = raw as { type?: string; content?: unknown };
+      if (block.type !== "tool_result") continue;
+      let text = "";
+      if (typeof block.content === "string") {
+        text = block.content;
+      } else if (Array.isArray(block.content)) {
+        text = (block.content as Array<{ type?: string; text?: string }>)
+          .filter((b) => b.type === "text" && b.text)
+          .map((b) => b.text ?? "")
+          .join("\n");
+      }
+      const output = extractProgressLine(text);
+      if (output) {
+        events.push({ seq: 0, type: "status", data: { phase: "tool_result", output } });
+      }
+    }
   } else if (type === "result") {
     final = {
       text: typeof obj.result === "string" ? obj.result : "",
@@ -98,9 +144,31 @@ interface RunnerResult {
   sessionId?: string;
   finalText: string;
   failed: boolean;
+  cancelled?: boolean;
 }
 
 type Enqueue = (events: JobEvent[]) => void;
+
+/**
+ * Polls the control plane every 2s to detect if the user cancelled the job.
+ * When detected, sends SIGTERM to the child process (SIGKILL after 3s).
+ * Returns a disposer that clears the interval.
+ */
+function watchForCancellation(
+  jobId: string,
+  kill: () => void
+): () => void {
+  let triggered = false;
+  const iv = setInterval(() => {
+    api.checkJobCancelled(jobId).then(({ cancelling }) => {
+      if (cancelling && !triggered) {
+        triggered = true;
+        kill();
+      }
+    }).catch(() => {});
+  }, 2000);
+  return () => clearInterval(iv);
+}
 
 function spawnCli(
   command: string,
@@ -319,9 +387,16 @@ async function runClaude(
   let sessionId: string | undefined = job.llmSessionId ?? undefined;
   let finalText = "";
   let failed = false;
+  let cancelled = false;
 
   await new Promise<void>((resolveRun) => {
     const child = spawnCli("claude", args, { cwd: plan.cwd });
+
+    const stopWatcher = watchForCancellation(job.id, () => {
+      cancelled = true;
+      child.kill("SIGTERM");
+      setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* already dead */ } }, 3000);
+    });
 
     const rl = createInterface({ input: child.stdout });
     rl.on("line", (line) => {
@@ -339,6 +414,7 @@ async function runClaude(
     child.stderr.on("data", (d) => (stderr += d.toString()));
 
     child.on("error", (err) => {
+      stopWatcher();
       const msg =
         (err as NodeJS.ErrnoException).code === "ENOENT"
           ? "`claude` CLI not found on PATH - install it and log in with your subscription."
@@ -350,6 +426,11 @@ async function runClaude(
     });
 
     child.on("close", (code) => {
+      stopWatcher();
+      if (cancelled) {
+        resolveRun();
+        return;
+      }
       if (code !== 0 && !finalText) {
         finalText = stderr.trim().split("\n").slice(-5).join("\n") || `claude exited with code ${code}`;
         failed = true;
@@ -358,7 +439,7 @@ async function runClaude(
     });
   });
 
-  return { sessionId, finalText, failed };
+  return { sessionId, finalText, failed, cancelled };
 }
 
 function extractCodexSessionId(value: unknown): string | undefined {
@@ -400,12 +481,19 @@ async function runCodex(
 
   let sessionId: string | undefined = job.llmSessionId ?? undefined;
   let failed = false;
+  let cancelled = false;
   let stderr = "";
 
   try {
     await new Promise<void>((resolveRun) => {
       const child = spawnCli("codex", args, { cwd: plan.cwd });
       child.stdin.end(prompt);
+
+      const stopWatcher = watchForCancellation(job.id, () => {
+        cancelled = true;
+        child.kill("SIGTERM");
+        setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* already dead */ } }, 3000);
+      });
 
       const rl = createInterface({ input: child.stdout });
       rl.on("line", (line) => {
@@ -424,6 +512,7 @@ async function runCodex(
       child.stderr.on("data", (d) => (stderr += d.toString()));
 
       child.on("error", (err) => {
+        stopWatcher();
         stderr +=
           (err as NodeJS.ErrnoException).code === "ENOENT"
             ? "`codex` CLI not found on PATH - install it and log in before selecting Codex."
@@ -432,7 +521,8 @@ async function runCodex(
         resolveRun();
       });
       child.on("close", (code) => {
-        if (code !== 0) failed = true;
+        stopWatcher();
+        if (code !== 0 && !cancelled) failed = true;
         resolveRun();
       });
     });
@@ -446,7 +536,7 @@ async function runCodex(
     if (!finalText && failed) {
       finalText = stderr.trim().split("\n").slice(-8).join("\n") || "codex failed without a final message";
     }
-    return { sessionId, finalText, failed };
+    return { sessionId, finalText, failed, cancelled };
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
@@ -608,14 +698,15 @@ async function runJob(job: AgentJob, cfg: AgentConfig): Promise<void> {
 
   await flushing;
   await flush();
+  const completionStatus = result.cancelled ? "stopped" : result.failed ? "failed" : "done";
   await api.completeJob(job.id, {
-    status: result.failed ? "failed" : "done",
-    error: result.failed ? result.finalText.slice(0, 2000) : undefined,
+    status: completionStatus,
+    error: result.cancelled ? "Stopped." : result.failed ? result.finalText.slice(0, 2000) : undefined,
     llmProvider: job.llmProvider,
     llmSessionId: result.sessionId,
-    finalText: result.finalText,
+    finalText: result.cancelled ? undefined : result.finalText,
   });
-  log(result.failed ? "  x job failed" : "  ok job done");
+  log(result.cancelled ? "  - job stopped" : result.failed ? "  x job failed" : "  ok job done");
 }
 
 /* ------------------------------- daemon ------------------------------- */

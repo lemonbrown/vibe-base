@@ -142,6 +142,11 @@ export const api = {
       body: body(payload),
     }),
 
+  stopConversation: (convId: string) =>
+    http<{ ok: boolean; jobId: string | null }>(`/api/chat/${convId}/stop`, {
+      method: "POST",
+    }),
+
   /* -------------------------------- agent -------------------------------- */
 
   getMachineStatus: () =>

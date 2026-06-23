@@ -6,6 +6,7 @@ import {
   useConversation,
   useMachineStatus,
   useSendMessage,
+  useStopConversation,
 } from "../lib/queries";
 import { streamJob } from "../lib/stream";
 import { Composer } from "../components/Composer";
@@ -22,8 +23,16 @@ interface Live {
   text: string;
   thinking: string;
   tools: string[];
+  statusText: string;
   error?: string;
   active: boolean;
+  stopping?: boolean;
+  startedAt: number;
+}
+
+function formatElapsed(sec: number): string {
+  if (sec < 60) return `${sec}s`;
+  return `${Math.floor(sec / 60)}m ${sec % 60}s`;
 }
 
 function ToolChip({ name }: { name: string }) {
@@ -61,8 +70,10 @@ function Bubble({
           <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-faint)]">
             {isUser ? "You" : "Agent"}
           </span>
-          {status === "failed" && (
-            <span className="text-[10px] font-semibold uppercase text-[var(--color-bad)]">failed</span>
+          {(status === "failed" || status === "stopped") && (
+            <span className="text-[10px] font-semibold uppercase text-[var(--color-bad)]">
+              {status === "stopped" ? "stopped" : "failed"}
+            </span>
           )}
         </div>
         {tools && tools.length > 0 && (
@@ -87,9 +98,10 @@ function Caret() {
   );
 }
 
-function ThinkingBlock({ text, active }: { text: string; active: boolean }) {
+function ThinkingBlock({ text, active, elapsed }: { text: string; active: boolean; elapsed?: number }) {
   const [open, setOpen] = useState(false);
   const toggle = useCallback(() => setOpen((v) => !v), []);
+  const elapsedStr = elapsed !== undefined && elapsed > 0 ? ` · ${formatElapsed(elapsed)}` : "";
   return (
     <div className="mb-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] text-xs">
       <button
@@ -97,7 +109,7 @@ function ThinkingBlock({ text, active }: { text: string; active: boolean }) {
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[var(--color-muted)] hover:text-[var(--color-text)]"
       >
         <span className={active && !text ? "animate-pulse" : ""}>{active && !text ? "⏳" : "💭"}</span>
-        <span className="flex-1 font-medium">{active && !text ? "Thinking…" : "Thinking"}</span>
+        <span className="flex-1 font-medium">{active && !text ? `Thinking…${elapsedStr}` : "Thinking"}</span>
         {text && <span className="text-[var(--color-faint)]">{open ? "▲" : "▼"}</span>}
       </button>
       {open && text && (
@@ -115,11 +127,13 @@ export function ChatPage() {
   const { data: conv, isLoading, refetch } = useConversation(id);
   const { data: machine, isLoading: mLoading } = useMachineStatus();
   const send = useSendMessage(id);
+  const stopMutation = useStopConversation(id);
 
   // Optimistic messages shown immediately on send, until the refetch picks
   // up the authoritative ones; and the live streaming buffer.
   const [optimistic, setOptimistic] = useState<ChatMessage[]>([]);
   const [live, setLive] = useState<Live | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const disposeRef = useRef<(() => void) | null>(null);
   const resumedFor = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -129,9 +143,19 @@ export function ChatPage() {
     return () => disposeRef.current?.();
   }, [id]);
 
+  // Tick the elapsed timer while a job is actively streaming.
+  useEffect(() => {
+    if (!live?.active) { setElapsed(0); return; }
+    const iv = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - live.startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [live?.active, live?.startedAt]);
+
   const startStream = (asstId: string) => {
     disposeRef.current?.();
-    setLive({ asstId, text: "", thinking: "", tools: [], active: true });
+    setElapsed(0);
+    setLive({ asstId, text: "", thinking: "", tools: [], statusText: "", active: true, startedAt: Date.now() });
     disposeRef.current = streamJob(id, 0, {
       onEvent: (e) =>
         setLive((cur) => {
@@ -144,6 +168,16 @@ export function ChatPage() {
             return { ...cur, tools: [...cur.tools, String(e.data.name ?? "tool")] };
           if (e.type === "error")
             return { ...cur, error: String(e.data.error ?? "error") };
+          if (e.type === "status") {
+            const phase = typeof e.data.phase === "string" ? e.data.phase : "";
+            const output = typeof e.data.output === "string" ? e.data.output : "";
+            const event = typeof e.data.event === "string" ? e.data.event : "";
+            let label = "";
+            if (phase === "tool_result") label = output;
+            else if (phase === "init") label = "Initialized";
+            else label = event || phase;
+            return label ? { ...cur, statusText: label } : cur;
+          }
           return cur;
         }),
       onDone: async () => {
@@ -151,6 +185,7 @@ export function ChatPage() {
         qc.invalidateQueries({ queryKey: ["conversations"] });
         setOptimistic([]);
         setLive(null);
+        setElapsed(0);
       },
     });
   };
@@ -166,6 +201,12 @@ export function ChatPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conv, id, live]);
+
+  const handleStop = () => {
+    if (!live?.active || live.stopping) return;
+    setLive((cur) => cur ? { ...cur, stopping: true } : cur);
+    stopMutation.mutate();
+  };
 
   const onSend = async (
     content: string,
@@ -250,15 +291,24 @@ export function ChatPage() {
               <div key={m.id}>
                 <Bubble role="assistant" tools={live!.tools} streaming={live!.active} status={m.status}>
                   {(live!.thinking || (live!.active && !live!.text)) && (
-                    <ThinkingBlock text={live!.thinking} active={live!.active} />
+                    <ThinkingBlock text={live!.thinking} active={live!.active} elapsed={elapsed} />
                   )}
                   {live!.text ? (
-                    <MarkdownMessage
-                      content={live!.text}
-                      interactive
-                      triggersDisabled={live!.active || send.isPending}
-                      onTrigger={onTrigger}
-                    />
+                    <>
+                      <MarkdownMessage
+                        content={live!.text}
+                        interactive
+                        triggersDisabled={live!.active || send.isPending}
+                        onTrigger={onTrigger}
+                      />
+                      {live!.statusText && live!.active && (
+                        <p className="mt-1.5 truncate font-mono text-[10px] text-[var(--color-faint)]">
+                          {live!.statusText}
+                        </p>
+                      )}
+                    </>
+                  ) : live!.statusText ? (
+                    <p className="mb-1.5 text-xs italic text-[var(--color-faint)]">{live!.statusText}</p>
                   ) : !live!.thinking && (
                     <span className="inline-flex items-center gap-2 text-[var(--color-muted)]">
                       <Spinner /> waiting for agent…
@@ -297,7 +347,10 @@ export function ChatPage() {
 
       <Composer
         sending={send.isPending}
+        streaming={live?.active}
+        stopping={live?.stopping}
         onSend={onSend}
+        onStop={handleStop}
       />
     </div>
   );

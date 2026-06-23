@@ -134,6 +134,15 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
+  // Daemon polls this to detect if its running job was cancelled by the user.
+  app.get<{ Params: { id: string } }>("/api/agent/jobs/:id/status", async (req, reply) => {
+    const actor = await requireOwner(req, reply);
+    if (!actor) return;
+    const job = await one<{ status: string }>("SELECT status FROM jobs WHERE id = $1", [req.params.id]);
+    if (!job) return reply.code(404).send({ error: "job not found" });
+    return reply.send({ status: job.status, cancelling: job.status === "cancelling" });
+  });
+
   // Append streamed events from the daemon and grow the assistant message.
   app.post<{ Params: { id: string }; Body: { events?: JobEvent[] } }>(
     "/api/agent/jobs/:id/events",
@@ -197,7 +206,9 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
     );
     if (!job) return reply.code(404).send({ error: "job not found" });
 
-    const status = req.body?.status === "failed" ? "failed" : "done";
+    const status =
+      req.body?.status === "failed" ? "failed" :
+      req.body?.status === "stopped" ? "stopped" : "done";
     const finalText = req.body?.finalText;
 
     await query(
@@ -205,8 +216,8 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
       [req.params.id, status, req.body?.error ?? null]
     );
     if (job.message_id) {
-      const msgStatus = status === "failed" ? "failed" : "done";
-      if (typeof finalText === "string") {
+      const msgStatus = status === "failed" ? "failed" : status === "stopped" ? "stopped" : "done";
+      if (typeof finalText === "string" && status !== "stopped") {
         await query("UPDATE messages SET content = $2, status = $3 WHERE id = $1", [
           job.message_id,
           finalText,
