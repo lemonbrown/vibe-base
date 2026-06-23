@@ -68,6 +68,21 @@ export function extractProgressLine(output: string): string {
 }
 
 /**
+ * Extract a short human-readable label from a Codex command_execution command string.
+ * Strips the PowerShell/sh wrapper so the portal shows the actual command, not the shell path.
+ */
+export function codexCommandDisplay(cmd: string): string {
+  // PowerShell wrapper: "...powershell.exe" -Command 'actual command'
+  const psMatch = cmd.match(/-Command\s+'([^']+)'/i);
+  if (psMatch?.[1]) return psMatch[1].slice(0, 60);
+  // sh/bash wrapper: /bin/sh -c 'actual command'
+  const shMatch = cmd.match(/-c\s+'([^']+)'/);
+  if (shMatch?.[1]) return shMatch[1].slice(0, 60);
+  // Fallback: strip leading path component and truncate
+  return cmd.replace(/^"?[^"]*[/\\]([^/\\"]+)"?\s*/, "$1 ").trim().slice(0, 60);
+}
+
+/**
  * Parse one line of `claude --output-format stream-json`. Defensive: unknown or
  * malformed lines yield null rather than throwing, so a CLI format change never
  * crashes the daemon. `seq` is a placeholder (0) - the control plane assigns the
@@ -505,26 +520,23 @@ async function runCodex(
           const type = typeof obj.type === "string" ? obj.type : "";
           if (!type) return;
 
-          if (type === "item.completed") {
-            const item = obj.item as Record<string, unknown> | undefined;
-            if (!item) return;
-            const itemType = typeof item.type === "string" ? item.type : "";
-            if (itemType === "agent_message" && typeof item.text === "string" && item.text) {
-              // The full assistant response text for this turn.
-              enqueue([{ seq: 0, type: "text", data: { text: item.text } }]);
-            } else if (itemType === "function_call") {
-              const name = typeof item.name === "string" ? item.name : "tool";
-              enqueue([{ seq: 0, type: "tool", data: { name } }]);
-            } else if (itemType === "function_call_output") {
-              const output = typeof item.output === "string" ? item.output : "";
+          const item = obj.item as Record<string, unknown> | undefined;
+          const itemType = item && typeof item.type === "string" ? item.type : "";
+
+          if (type === "item.started" && itemType === "command_execution") {
+            // Show a tool chip as soon as the command begins running.
+            const cmd = typeof item!.command === "string" ? item!.command : "";
+            enqueue([{ seq: 0, type: "tool", data: { name: codexCommandDisplay(cmd) } }]);
+          } else if (type === "item.completed") {
+            if (itemType === "agent_message" && typeof item!.text === "string" && item!.text) {
+              enqueue([{ seq: 0, type: "text", data: { text: item!.text } }]);
+            } else if (itemType === "command_execution") {
+              const output = typeof item!.aggregated_output === "string" ? item!.aggregated_output : "";
               const progress = extractProgressLine(output);
               if (progress) enqueue([{ seq: 0, type: "status", data: { phase: "tool_result", output: progress } }]);
             }
-          } else if (type === "turn.started") {
-            enqueue([{ seq: 0, type: "status", data: { phase: "init" } }]);
           }
-          // All other event types (thread.started, turn.completed, etc.) are lifecycle
-          // noise — don't surface them in the portal.
+          // thread.started, turn.started/completed, and other lifecycle events are noise — suppress.
         } catch {
           /* Ignore non-JSON defensive noise. */
         }
