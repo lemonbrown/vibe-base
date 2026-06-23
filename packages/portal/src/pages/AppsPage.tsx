@@ -5,6 +5,17 @@ import { HealthBadge, StatusPill } from "../components/ui";
 import { EmptyState, InlineError, LoadingBlock } from "../components/States";
 import { relativeTime } from "../lib/format";
 
+function AppIcon({ svg }: { svg: string }) {
+  return (
+    <img
+      src={`data:image/svg+xml,${encodeURIComponent(svg)}`}
+      alt=""
+      aria-hidden
+      className="h-full w-full"
+    />
+  );
+}
+
 function AppCard({ app }: { app: AppSummary }) {
   return (
     <Link
@@ -12,9 +23,20 @@ function AppCard({ app }: { app: AppSummary }) {
       className="card group flex flex-col gap-3 p-4 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-2)]"
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="truncate font-medium group-hover:text-white">{app.name}</h3>
-          <p className="truncate text-xs text-[var(--color-faint)]">{app.id}</p>
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--color-surface-2)]">
+            {app.icon ? (
+              <AppIcon svg={app.icon} />
+            ) : (
+              <span className="text-lg font-semibold text-[var(--color-muted)]">
+                {app.name.charAt(0).toUpperCase()}
+              </span>
+            )}
+          </div>
+          <div className="min-w-0">
+            <h3 className="truncate font-medium group-hover:text-white">{app.name}</h3>
+            <p className="truncate text-xs text-[var(--color-faint)]">{app.id}</p>
+          </div>
         </div>
         <HealthBadge health={app.health} />
       </div>

@@ -35,6 +35,7 @@ export const AppSummarySchema = z.object({
   health: HealthSchema,
   currentDeploymentId: z.string().nullable(),
   lastDeployedAt: z.string().nullable(),
+  icon: z.string().nullable(),
 });
 export type AppSummary = z.infer<typeof AppSummarySchema>;
 

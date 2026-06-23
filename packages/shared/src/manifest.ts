@@ -105,6 +105,8 @@ export const ManifestSchema = z.object({
     .regex(/^[a-z0-9][a-z0-9-]*$/, "id must be lowercase alphanumeric/dashes"),
   name: z.string().min(1),
   description: z.string().default(""),
+  /** SVG string used as the app's icon in the portal. No scripts or external refs. */
+  icon: z.string().optional(),
   visibility: VisibilitySchema.default("private"),
   access: AccessSchema.default({}),
   runtime: RuntimeSchema.default({}),

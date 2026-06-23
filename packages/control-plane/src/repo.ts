@@ -126,5 +126,6 @@ export async function appSummary(row: AppRow): Promise<AppSummary> {
     lastDeployedAt: current?.completed_at
       ? current.completed_at.toISOString()
       : null,
+    icon: row.manifest.icon?.trim() ?? null,
   };
 }

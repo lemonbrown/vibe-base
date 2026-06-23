@@ -144,6 +144,10 @@ function buildPreamble(appId: string): string {
     `First run \`vibe init --name ${appId}\` to scaffold it, then read AGENTS.md and build ` +
     `the app per the request. Declare \`readModels\` in vibe.app.yaml for any data the user ` +
     `might ask about.\n\n` +
+    `Add an \`icon\` field to vibe.app.yaml containing a self-contained SVG that visually ` +
+    `represents the app's purpose. Use a square viewBox (e.g. viewBox="0 0 64 64"), flat or ` +
+    `subtly-gradated colors, and no scripts or external references. The icon appears in the ` +
+    `owner portal's app grid, so make it recognizable at 40×40 px.\n\n` +
     `Before running \`vibe ship\`, write end-to-end acceptance tests that cover the primary ` +
     `user flows described in the request. Place them in tests/e2e/smoke.spec.ts using ` +
     `Playwright's \`@playwright/test\` runner (add it to devDependencies if absent). ` +
