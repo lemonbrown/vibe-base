@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import type { AgentJob, JobEvent, JobKind } from "@vibe/shared";
 import { api } from "./client.js";
 import { hasCredentials } from "./config.js";
+import { slugify } from "./manifest.js";
 import {
   loadAgentConfig,
   resolveAppPath,
@@ -104,10 +105,20 @@ const ASK_PREAMBLE =
   "to read an app's data through its declared read-models (use `vibe query --app <id>` " +
   "to list them). Do NOT modify any files or deploy. Answer concisely.";
 
-const BUILD_PREAMBLE =
-  "You are building/updating a Vibe Base app. Follow AGENTS.md in this directory. " +
+function buildPreamble(appId: string): string {
+  return (
+    `You are building a NEW Vibe Base app with id "${appId}" in this (empty) directory. ` +
+    `First run \`vibe init --name ${appId}\` to scaffold it, then read AGENTS.md and build ` +
+    `the app per the request. Declare \`readModels\` in vibe.app.yaml for any data the user ` +
+    `might ask about. When it builds, run \`vibe ship\` to deploy. Use the \`vibe\` CLI for all ` +
+    `infrastructure and keep .vibe-memory/ up to date.`
+  );
+}
+
+const ADJUST_PREAMBLE =
+  "You are updating an existing Vibe Base app. Follow AGENTS.md in this directory. " +
   "Use the `vibe` CLI for infrastructure and run `vibe ship` to deploy when ready. " +
-  "Keep .vibe-memory/ up to date.";
+  "Keep readModels in vibe.app.yaml current and .vibe-memory/ up to date.";
 
 /** Decide where to run and with what tools, creating dirs for new apps. */
 async function planJob(job: AgentJob, cfg: AgentConfig): Promise<Plan> {
@@ -122,29 +133,39 @@ async function planJob(job: AgentJob, cfg: AgentConfig): Promise<Plan> {
     };
   }
 
-  if (!job.targetApp) {
-    throw new Error(`${kind} job has no target app`);
-  }
-  const { path } = resolveAppPath(cfg, job.targetApp);
-
   if (kind === "build") {
+    // A name is optional from the portal; derive a safe id if it's missing.
+    const appId = job.targetApp ? slugify(job.targetApp) : `app-${Date.now().toString(36)}`;
+    const { path } = resolveAppPath(cfg, appId);
     await mkdir(path, { recursive: true });
     // Remember where we put it so later adjust/ask jobs find the same dir.
-    if (!cfg.apps[job.targetApp]) {
-      cfg.apps[job.targetApp] = path;
+    if (!cfg.apps[appId]) {
+      cfg.apps[appId] = path;
       await saveAgentConfig(cfg);
     }
-  } else if (!(await exists(path))) {
+    return {
+      cwd: path,
+      allowedTools: WRITE_TOOLS,
+      permissionMode: "acceptEdits",
+      preamble: buildPreamble(appId),
+    };
+  }
+
+  // adjust — we must know which existing app, and it must already be on disk.
+  if (!job.targetApp) {
+    throw new Error("adjust job needs a target app — pick one in the chat");
+  }
+  const { path } = resolveAppPath(cfg, job.targetApp);
+  if (!(await exists(path))) {
     throw new Error(
       `app "${job.targetApp}" has no local directory at ${path} — link it with \`vibe agent link ${job.targetApp} <path>\``
     );
   }
-
   return {
     cwd: path,
     allowedTools: WRITE_TOOLS,
     permissionMode: "acceptEdits",
-    preamble: BUILD_PREAMBLE,
+    preamble: ADJUST_PREAMBLE,
   };
 }
 

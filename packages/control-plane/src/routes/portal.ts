@@ -334,6 +334,7 @@ export async function portalRoutes(app: FastifyInstance): Promise<void> {
             <option value="adjust">Adjust (edit app)</option>
           </select>
           <select id="app"><option value="">(no app)</option>${appOpts}</select>
+          <input id="newapp" placeholder="new app id, e.g. my-lists" style="display:none">
           <button id="send">Send</button>
         </div>
       </div>
@@ -349,11 +350,22 @@ export async function portalRoutes(app: FastifyInstance): Promise<void> {
           log.appendChild(d); window.scrollTo(0, document.body.scrollHeight);
           return d.querySelector('div');
         }
+        const kindSel = document.getElementById('kind');
+        const appSel = document.getElementById('app');
+        const newApp = document.getElementById('newapp');
+        // Build needs a NEW app id (text); ask/adjust pick from existing apps.
+        function syncTargets(){
+          const build = kindSel.value === 'build';
+          newApp.style.display = build ? '' : 'none';
+          appSel.style.display = build ? 'none' : '';
+        }
+        kindSel.addEventListener('change', syncTargets); syncTargets();
         async function send(){
           const text = document.getElementById('text').value.trim();
           if(!text) return;
-          const kind = document.getElementById('kind').value;
-          const targetApp = document.getElementById('app').value || null;
+          const kind = kindSel.value;
+          const targetApp = (kind === 'build' ? newApp.value.trim() : appSel.value) || null;
+          if(kind === 'adjust' && !targetApp){ alert('Pick an app to adjust.'); return; }
           document.getElementById('text').value = '';
           bubble('user', text);
           const out = bubble('assistant', '…');
