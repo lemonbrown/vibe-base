@@ -173,9 +173,22 @@ export function ChatPage() {
             const output = typeof e.data.output === "string" ? e.data.output : "";
             const event = typeof e.data.event === "string" ? e.data.event : "";
             let label = "";
-            if (phase === "tool_result") label = output;
-            else if (phase === "init") label = "Initialized";
-            else label = event || phase;
+            if (phase === "tool_result") {
+              label = output;
+            } else if (phase === "init") {
+              label = "Initialized";
+            } else if (event) {
+              // Map known Codex event types to friendly labels; drop the rest.
+              const codexLabels: Record<string, string> = {
+                "response.created": "Starting…",
+                "response.in_progress": "Thinking…",
+                "response.completed": "Completed",
+                "response.failed": "Failed",
+                "tool_call.in_progress": "Running tool…",
+                "tool_call.completed": "Tool done",
+              };
+              label = codexLabels[event] ?? "";
+            }
             return label ? { ...cur, statusText: label } : cur;
           }
           return cur;
@@ -289,7 +302,7 @@ export function ChatPage() {
           if (m.role === "assistant" && isLive) {
             return (
               <div key={m.id}>
-                <Bubble role="assistant" tools={live!.tools} streaming={live!.active} status={m.status}>
+                <Bubble role="assistant" tools={live!.tools} streaming={live!.active && !!live!.text} status={m.status}>
                   {(live!.thinking || (live!.active && !live!.text)) && (
                     <ThinkingBlock text={live!.thinking} active={live!.active} elapsed={elapsed} />
                   )}
