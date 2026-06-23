@@ -1,4 +1,8 @@
-import { spawn } from "node:child_process";
+import {
+  spawn,
+  type ChildProcessWithoutNullStreams,
+  type SpawnOptionsWithoutStdio,
+} from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,6 +99,24 @@ interface RunnerResult {
 }
 
 type Enqueue = (events: JobEvent[]) => void;
+
+function spawnCli(
+  command: string,
+  args: string[],
+  options: SpawnOptionsWithoutStdio
+): ChildProcessWithoutNullStreams {
+  if (process.platform !== "win32") {
+    return spawn(command, args, { ...options, shell: false });
+  }
+
+  // npm-installed CLIs on Windows are commonly .cmd shims. Node cannot execute
+  // those directly with shell: false, so let cmd.exe resolve the command while
+  // keeping the argument list separate.
+  return spawn(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", command, ...args], {
+    ...options,
+    shell: false,
+  });
+}
 
 const READONLY_TOOLS = [
   "Read",
@@ -267,7 +289,7 @@ async function runClaude(
   let failed = false;
 
   await new Promise<void>((resolveRun) => {
-    const child = spawn("claude", args, { cwd: plan.cwd, shell: false });
+    const child = spawnCli("claude", args, { cwd: plan.cwd });
 
     const rl = createInterface({ input: child.stdout });
     rl.on("line", (line) => {
@@ -349,7 +371,7 @@ async function runCodex(
 
   try {
     await new Promise<void>((resolveRun) => {
-      const child = spawn("codex", args, { cwd: plan.cwd, shell: false, stdio: ["pipe", "pipe", "pipe"] });
+      const child = spawnCli("codex", args, { cwd: plan.cwd });
       child.stdin.end(prompt);
 
       const rl = createInterface({ input: child.stdout });
