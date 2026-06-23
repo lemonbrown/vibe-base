@@ -18,6 +18,8 @@ interface JobRow {
   target_app: string | null;
   instruction: string;
   claude_session_id: string | null;
+  plan_mode: boolean;
+  stack_policy: string | null;
 }
 
 function toAgentJob(row: JobRow): AgentJob {
@@ -29,6 +31,8 @@ function toAgentJob(row: JobRow): AgentJob {
     targetApp: row.target_app,
     instruction: row.instruction,
     claudeSessionId: row.claude_session_id,
+    planMode: row.plan_mode,
+    stackPolicy: row.stack_policy,
   };
 }
 
@@ -41,7 +45,7 @@ async function claimNext(machineId: string): Promise<JobRow | null> {
           ORDER BY created_at ASC
           FOR UPDATE SKIP LOCKED LIMIT 1
        )
-       RETURNING id, conv_id, message_id, kind, target_app, instruction, claude_session_id`,
+       RETURNING id, conv_id, message_id, kind, target_app, instruction, claude_session_id, plan_mode, stack_policy`,
     [machineId]
   );
   return res.rows[0] ?? null;

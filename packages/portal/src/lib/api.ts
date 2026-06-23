@@ -8,9 +8,10 @@ import type {
   PlatformRole,
   JobKind,
   MachineStatus,
+  OwnerSettings,
 } from "@vibe/shared";
 
-export type { MachineStatus };
+export type { MachineStatus, OwnerSettings };
 
 export class ApiError extends Error {
   constructor(
@@ -125,7 +126,12 @@ export const api = {
 
   sendMessage: (
     convId: string,
-    payload: { content: string; kind: JobKind; targetApp: string | null }
+    payload: {
+      content: string;
+      kind: JobKind;
+      targetApp: string | null;
+      planMode: boolean;
+    }
   ) =>
     http<{
       jobId: string;
@@ -142,4 +148,15 @@ export const api = {
     http<{ machine: MachineStatus | null }>("/api/agent/status").then(
       (r) => r.machine
     ),
+
+  /* ------------------------------- settings ------------------------------ */
+
+  getSettings: () =>
+    http<{ settings: OwnerSettings }>("/api/settings").then((r) => r.settings),
+
+  updateSettings: (patch: Partial<OwnerSettings>) =>
+    http<{ settings: OwnerSettings }>("/api/settings", {
+      method: "PUT",
+      body: body(patch),
+    }).then((r) => r.settings),
 };

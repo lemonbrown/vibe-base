@@ -25,10 +25,25 @@ function ChatIcon({ className = "" }: { className?: string }) {
     </svg>
   );
 }
+function GearIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M12 2.5l1.6 2.2 2.7-.5 1 2.6 2.4 1.3-.6 2.7L20.5 14l-1.4 2.4.6 2.7-2.4 1.3-1 2.6-2.7-.5L12 21.5l-1.6-2.2-2.7.5-1-2.6L4.3 16l.6-2.7L3.5 11l1.4-2.4-.6-2.7 2.4-1.3 1-2.6 2.7.5L12 2.5z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+        opacity="0.5"
+      />
+    </svg>
+  );
+}
 
 const NAV = [
   { to: "/", label: "Apps", icon: GridIcon, match: (p: string) => p === "/" || p.startsWith("/apps") },
   { to: "/chat", label: "Chat", icon: ChatIcon, match: (p: string) => p.startsWith("/chat") },
+  { to: "/settings", label: "Settings", icon: GearIcon, match: (p: string) => p.startsWith("/settings") },
 ];
 
 function Brand() {

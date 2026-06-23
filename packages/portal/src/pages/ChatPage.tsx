@@ -140,10 +140,15 @@ export function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conv, id, live]);
 
-  const onSend = async (content: string, kind: JobKind, targetApp: string | null) => {
+  const onSend = async (
+    content: string,
+    kind: JobKind,
+    targetApp: string | null,
+    planMode: boolean
+  ) => {
     const now = new Date().toISOString();
     try {
-      const res = await send.mutateAsync({ content, kind, targetApp });
+      const res = await send.mutateAsync({ content, kind, targetApp, planMode });
       setOptimistic([
         { id: res.userMessageId, role: "user", content, status: "done", createdAt: now },
         { id: res.assistantMessageId, role: "assistant", content: "", status: "pending", createdAt: now },

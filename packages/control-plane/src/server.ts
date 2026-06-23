@@ -17,6 +17,7 @@ import { githubRoutes } from "./routes/github.js";
 import { memberRoutes } from "./routes/members.js";
 import { portalRoutes } from "./routes/portal.js";
 import { queryRoutes } from "./routes/query.js";
+import { settingsRoutes } from "./routes/settings.js";
 import { statusRoutes } from "./routes/status.js";
 
 /** Body parser for deploy uploads: stream the gzipped tar to a temp file. */
@@ -58,6 +59,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(queryRoutes);
   await app.register(agentRoutes);
   await app.register(chatRoutes);
+  await app.register(settingsRoutes);
   await app.register(portalRoutes);
 
   return app;

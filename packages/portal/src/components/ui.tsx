@@ -59,6 +59,41 @@ export function Card({
   );
 }
 
+/** Accessible on/off switch. */
+export function Toggle({
+  checked,
+  onChange,
+  label,
+  id,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label?: string;
+  id?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      id={id}
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={classNames(
+        "relative inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors",
+        checked ? "bg-[var(--color-brand)]" : "bg-[var(--color-border-strong)]"
+      )}
+    >
+      <span
+        className={classNames(
+          "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+          checked ? "translate-x-5" : "translate-x-1"
+        )}
+      />
+    </button>
+  );
+}
+
 /**
  * A button that arms on first click and fires on the second, so destructive
  * actions (revoke, roll back) need a deliberate confirm without a modal.

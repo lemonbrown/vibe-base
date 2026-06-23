@@ -8,6 +8,7 @@ import type {
 import { one, query } from "../db.js";
 import { shortId } from "../lib/ids.js";
 import { requireUser } from "./guards.js";
+import { loadOwnerSettings } from "./settings.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const VALID_KINDS: JobKind[] = ["ask", "build", "adjust"];
@@ -96,7 +97,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
   // a job for the owner's daemon to run `claude` against.
   app.post<{
     Params: { id: string };
-    Body: { content?: string; kind?: string; targetApp?: string };
+    Body: { content?: string; kind?: string; targetApp?: string; planMode?: boolean };
   }>("/api/chat/:id/messages", async (req, reply) => {
     const actor = await requireUser(req, reply);
     if (!actor) return;
@@ -109,6 +110,16 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       ? (req.body!.kind as JobKind)
       : "ask";
     const targetApp = req.body?.targetApp ?? conv.target_app;
+
+    // Snapshot the owner's settings onto the job so later edits never rewrite
+    // in-flight work. The stack policy only applies where tech choices matter.
+    const settings = await loadOwnerSettings(actor.email);
+    const planMode =
+      typeof req.body?.planMode === "boolean" ? req.body.planMode : settings.planModeDefault;
+    const stackPolicy =
+      (kind === "build" || kind === "adjust") && settings.stackPolicy.trim()
+        ? settings.stackPolicy
+        : null;
 
     const userMsgId = shortId("msg");
     const asstMsgId = shortId("msg");
@@ -123,9 +134,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       [asstMsgId, conv.id]
     );
     await query(
-      `INSERT INTO jobs (id, conv_id, message_id, kind, target_app, instruction, claude_session_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [jobId, conv.id, asstMsgId, kind, targetApp, content, conv.claude_session_id ?? null]
+      `INSERT INTO jobs (id, conv_id, message_id, kind, target_app, instruction, claude_session_id, plan_mode, stack_policy)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [jobId, conv.id, asstMsgId, kind, targetApp, content, conv.claude_session_id ?? null, planMode, stackPolicy]
     );
 
     // Title a fresh conversation from its first message.

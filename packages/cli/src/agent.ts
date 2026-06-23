@@ -184,6 +184,9 @@ async function runJob(job: AgentJob, cfg: AgentConfig): Promise<void> {
   }
 
   const prompt = `${plan.preamble}\n\n---\n\n${job.instruction}`;
+  // Plan mode (set per message in the portal) overrides the kind's default —
+  // claude researches and returns a plan without editing or executing.
+  const permissionMode = job.planMode ? "plan" : plan.permissionMode;
   const args = [
     "-p",
     prompt,
@@ -191,13 +194,18 @@ async function runJob(job: AgentJob, cfg: AgentConfig): Promise<void> {
     "stream-json",
     "--verbose",
     "--permission-mode",
-    plan.permissionMode,
+    permissionMode,
     "--allowedTools",
     plan.allowedTools.join(","),
   ];
+  // The owner's stack/preferences policy, scoped server-side to build/adjust,
+  // rides in as system-prompt context rather than polluting the user message.
+  if (job.stackPolicy && job.stackPolicy.trim()) {
+    args.push("--append-system-prompt", job.stackPolicy);
+  }
   if (job.claudeSessionId) args.push("--resume", job.claudeSessionId);
 
-  log(`  → claude (${job.kind}) in ${plan.cwd}`);
+  log(`  → claude (${job.kind}${job.planMode ? ", plan" : ""}) in ${plan.cwd}`);
 
   let sessionId: string | undefined = job.claudeSessionId ?? undefined;
   let finalText = "";

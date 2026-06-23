@@ -239,4 +239,17 @@ export interface AgentJob {
   instruction: string;
   /** Prior `claude` session to resume for multi-turn conversations. */
   claudeSessionId: string | null;
+  /** When true, run `claude` in plan mode (plans, doesn't edit/execute). */
+  planMode: boolean;
+  /** Stack/preferences policy to append to claude's system prompt (build/adjust
+   *  only; null otherwise). Snapshotted from owner settings at send time. */
+  stackPolicy: string | null;
+}
+
+/** Per-owner chat settings configured from the portal. */
+export interface OwnerSettings {
+  /** Free-text stack/preferences injected into build + adjust jobs. */
+  stackPolicy: string;
+  /** Initial state of the chat composer's plan-mode toggle. */
+  planModeDefault: boolean;
 }

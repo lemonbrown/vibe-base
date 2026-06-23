@@ -1,6 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import type { AppSummary, JobKind } from "@vibe/shared";
 import { classNames } from "../lib/format";
+import { useSettings } from "../lib/queries";
+import { Toggle } from "./ui";
 
 const KINDS: { value: JobKind; label: string; hint: string }[] = [
   { value: "ask", label: "Ask", hint: "Read-only — answers from your live data. No edits." },
@@ -17,22 +20,36 @@ export function Composer({
   apps: AppSummary[];
   defaultTargetApp: string | null;
   sending: boolean;
-  onSend: (content: string, kind: JobKind, targetApp: string | null) => void;
+  onSend: (
+    content: string,
+    kind: JobKind,
+    targetApp: string | null,
+    planMode: boolean
+  ) => void;
 }) {
+  const { data: settings } = useSettings();
   const [text, setText] = useState("");
   const [kind, setKind] = useState<JobKind>("ask");
   const [appId, setAppId] = useState(defaultTargetApp ?? "");
   const [newAppId, setNewAppId] = useState("");
+  const [plan, setPlan] = useState(false);
+  const planTouched = useRef(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // Seed the plan toggle from the saved default until the user flips it.
+  useEffect(() => {
+    if (settings && !planTouched.current) setPlan(settings.planModeDefault);
+  }, [settings]);
 
   const targetApp = kind === "build" ? newAppId.trim() : appId || null;
   const needsTarget = kind === "build" || kind === "adjust";
   const canSend = !!text.trim() && !sending && !(needsTarget && !targetApp);
   const meta = KINDS.find((k) => k.value === kind)!;
+  const policyActive = needsTarget && !!settings?.stackPolicy.trim();
 
   const submit = () => {
     if (!canSend) return;
-    onSend(text.trim(), kind, targetApp || null);
+    onSend(text.trim(), kind, targetApp || null, plan);
     setText("");
     if (taRef.current) taRef.current.style.height = "auto";
   };
@@ -42,8 +59,8 @@ export function Composer({
       className="sticky bottom-0 z-10 border-t border-[var(--color-border)] bg-[var(--color-bg)] pt-3"
       style={{ paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom))" }}
     >
-      {/* Kind segmented control */}
-      <div className="mb-2 flex items-center gap-2">
+      {/* Kind segmented control + plan toggle */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex w-full rounded-lg border border-[var(--color-border-strong)] p-0.5 text-sm sm:w-auto">
           {KINDS.map((k) => (
             <button
@@ -61,17 +78,48 @@ export function Composer({
             </button>
           ))}
         </div>
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <span className={plan ? "text-[var(--color-text)]" : "text-[var(--color-muted)]"}>
+            Plan
+          </span>
+          <Toggle
+            checked={plan}
+            label="Plan mode"
+            onChange={(v) => {
+              planTouched.current = true;
+              setPlan(v);
+            }}
+          />
+        </label>
       </div>
 
       <p className="mb-2 text-xs text-[var(--color-muted)]">
         {meta.hint}
-        {needsTarget && (
+        {needsTarget && !plan && (
           <span className="text-[var(--color-faint)]">
             {" "}
             Runs Claude with edits + shell in the app's directory on your machine.
           </span>
         )}
+        {plan && (
+          <span className="text-[var(--color-warn)]">
+            {" "}
+            Plan mode: Claude proposes a plan instead of editing/executing — turn
+            off to run it.
+          </span>
+        )}
       </p>
+
+      {policyActive && (
+        <p className="mb-2 text-xs text-[var(--color-faint)]">
+          <span className="pill mr-1 bg-[var(--color-surface-2)] text-[var(--color-muted)]">
+            ⚙ stack policy active
+          </span>
+          <Link to="/settings" className="text-[var(--color-brand)]">
+            edit
+          </Link>
+        </p>
+      )}
 
       {/* Target selector */}
       <div className="mb-2">

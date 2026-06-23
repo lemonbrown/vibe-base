@@ -199,6 +199,23 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS job_events_job_idx ON job_events(job_id, seq);
     `,
   },
+  {
+    // Per-owner chat settings: a free-text stack policy injected into build/
+    // adjust jobs, and a default for plan mode. Jobs snapshot both at send time
+    // so editing settings later never rewrites in-flight work.
+    id: "0005_owner_settings",
+    sql: `
+      CREATE TABLE IF NOT EXISTS owner_settings (
+        owner_email       TEXT PRIMARY KEY,
+        stack_policy      TEXT NOT NULL DEFAULT '',
+        plan_mode_default BOOLEAN NOT NULL DEFAULT false,
+        updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      ALTER TABLE jobs ADD COLUMN IF NOT EXISTS plan_mode    BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE jobs ADD COLUMN IF NOT EXISTS stack_policy TEXT;
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

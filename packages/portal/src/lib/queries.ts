@@ -3,7 +3,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import type { PlatformRole, JobKind } from "@vibe/shared";
+import type { PlatformRole, JobKind, OwnerSettings } from "@vibe/shared";
 import { api } from "./api";
 
 /* -------------------------------- queries ------------------------------- */
@@ -68,6 +68,22 @@ export function useMachineStatus() {
   });
 }
 
+export function useSettings() {
+  return useQuery({
+    queryKey: ["settings"],
+    queryFn: api.getSettings,
+    staleTime: 60_000,
+  });
+}
+
+export function useUpdateSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Partial<OwnerSettings>) => api.updateSettings(patch),
+    onSuccess: (settings) => qc.setQueryData(["settings"], settings),
+  });
+}
+
 /* ------------------------------- mutations ------------------------------ */
 
 export function useInvite(id: string) {
@@ -120,6 +136,7 @@ export function useSendMessage(convId: string) {
       content: string;
       kind: JobKind;
       targetApp: string | null;
+      planMode: boolean;
     }) => api.sendMessage(convId, v),
   });
 }
