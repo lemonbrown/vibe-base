@@ -245,6 +245,82 @@ export async function cmdGithubConnect(opts: {
   await connectGithub(dir, manifest, { private: opts.private });
 }
 
+/* --------------------------------- ci --------------------------------- */
+
+/** Run gh CLI, return { ok, out }. Never throws. */
+async function ghCmd(args: string[], dir: string): Promise<{ ok: boolean; out: string }> {
+  try {
+    const { stdout, stderr } = await execFileAsync("gh", args, {
+      cwd: dir,
+      shell: process.platform === "win32",
+    });
+    return { ok: true, out: `${stdout}${stderr}`.trim() };
+  } catch (e) {
+    const err = e as { stdout?: string; stderr?: string; message?: string };
+    return { ok: false, out: `${err.stdout ?? ""}${err.stderr ?? err.message ?? ""}`.trim() };
+  }
+}
+
+/**
+ * Poll the GitHub Actions run for the current HEAD commit until it completes,
+ * then print failed step logs so the LLM can diagnose and fix the issue.
+ * Requires the `gh` CLI installed and authenticated (`gh auth login`).
+ */
+export async function cmdCi(): Promise<void> {
+  const dir = cwd();
+
+  const sha = (await git(["rev-parse", "HEAD"], dir)).out;
+  if (!sha) throw new Error("Not in a git repo or no commits.");
+
+  log(`Waiting for CI run for commit ${sha.slice(0, 7)}…`);
+
+  const deadline = Date.now() + 20 * 60 * 1000; // 20-min ceiling for Docker builds
+  let runId: string | undefined;
+  let lastStatus = "";
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 10_000));
+
+    const res = await ghCmd(
+      ["run", "list", "--commit", sha, "--limit", "1", "--json", "databaseId,status,conclusion"],
+      dir
+    );
+    if (!res.ok) continue; // transient error — keep polling
+
+    let run: { databaseId: number; status: string; conclusion: string | null } | undefined;
+    try {
+      run = (JSON.parse(res.out) as typeof run[])[0];
+    } catch {
+      continue;
+    }
+    if (!run) continue; // not triggered yet
+
+    runId = String(run.databaseId);
+    if (run.status !== lastStatus) {
+      log(`  run #${runId}: ${run.status}`);
+      lastStatus = run.status;
+    }
+    if (run.status !== "completed") continue;
+
+    if (run.conclusion === "success") {
+      log(`\n✓ CI passed.`);
+      return;
+    }
+
+    log(`\n✗ CI ${run.conclusion ?? "failed"}. Fetching failed step logs…\n`);
+    const logs = await ghCmd(["run", "view", runId, "--log-failed"], dir);
+    log((logs.out || "(no log output)").slice(0, 20_000));
+    process.exitCode = 1;
+    return;
+  }
+
+  const hint = runId
+    ? `Run #${runId} did not complete within 20 minutes. Check the repo's Actions tab.`
+    : "No Actions run appeared for this commit. Ensure a workflow triggers on push to main.";
+  log(`\n⚠ ${hint}`);
+  process.exitCode = 1;
+}
+
 /* -------------------------------- ship -------------------------------- */
 
 /**
@@ -291,7 +367,7 @@ export async function cmdShip(opts: { message?: string } = {}): Promise<void> {
   }
   log(
     "\n✓ Pushed. GitHub Actions is building and rolling out the new version." +
-      "\nWatch it with `vibe status` or the repo's Actions / Deployments tab."
+      "\nRun `vibe ci` to monitor the build and get logs if it fails."
   );
 }
 

@@ -94,14 +94,16 @@ Deploying (GitHub is the default path):
 - **To deploy, run \`vibe ship\`. That's the whole thing — one command.** It
   connects the app to GitHub on first run (creates the repo + CI and pushes) and
   commits + pushes on every run after, triggering the build and rollout.
-- **You (the agent) run \`vibe ship\` yourself** once the app is ready — do not
-  print deploy steps for the user to run. Deploying the app is your job, not the
-  user's. The only thing you escalate is missing credentials (above).
-- Redeploy after any change by running \`vibe ship\` again.
+- **Immediately after \`vibe ship\`, run \`vibe ci\`** to monitor the GitHub Actions
+  build. It polls until the run completes and prints the failed step logs if it
+  fails. Fix the issue and run \`vibe ship\` again.
+- **You (the agent) run \`vibe ship\` and \`vibe ci\` yourself** — do not print
+  deploy steps for the user to run. Deploying and monitoring CI is your job.
+  The only thing you escalate is missing credentials (above).
+- Redeploy after any change by running \`vibe ship\` again (then \`vibe ci\`).
 - The repo's \`Dockerfile\` defines the build; keep it working. (\`custom-dockerfile\`
   apps own theirs; others get one generated from \`vibe.app.yaml\`.)
-- Check progress with \`vibe status\` / \`vibe logs\`; the repo's Deployments tab
-  also shows rollout state.
+- Check runtime state with \`vibe status\` / \`vibe logs\` after CI passes.
 `;
 
 // Pointer files so each coding agent loads the same instructions. AGENTS.md is
@@ -174,7 +176,11 @@ const RUNBOOK_MD = `# Runbook
 \`vibe ship\` — one command. First run connects the app to GitHub (repo + CI) and
 pushes; later runs commit + push. Either way GitHub Actions builds the image,
 the platform pulls it, runs migrations, health-checks, and flips the proxy to
-the new version. Rollout state shows up in the repo's Actions / Deployments tab.
+the new version.
+
+After every \`vibe ship\`, run \`vibe ci\` to monitor the GitHub Actions build.
+It polls until the run completes and prints failed step logs on failure — fix
+the issue and re-ship. Requires \`gh\` CLI installed and authenticated.
 
 Manual / no-GitHub fallbacks:
 - \`vibe deploy\` — build the context on the VPS instead of via CI.

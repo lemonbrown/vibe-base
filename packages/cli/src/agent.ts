@@ -239,14 +239,18 @@ function buildPreamble(appId: string): string {
     `Also write playwright.config.ts at the project root — set baseURL from the ` +
     `PLAYWRIGHT_BASE_URL environment variable, falling back to http://localhost:3000, ` +
     `and set testDir to "tests". ` +
-    `Once the app builds, run \`vibe ship\` to deploy. Use the \`vibe\` CLI for all ` +
-    `infrastructure and keep .vibe-memory/ up to date.`
+    `Once the app builds, run \`vibe ship\` to deploy, then immediately run \`vibe ci\` ` +
+    `to monitor the GitHub Actions build. If CI fails, read the log output it prints, fix ` +
+    `the issue, and run \`vibe ship\` again. Use the \`vibe\` CLI for all infrastructure ` +
+    `and keep .vibe-memory/ up to date.`
   );
 }
 
 const ADJUST_PREAMBLE =
   "You are updating an existing Vibe Base app. Follow AGENTS.md in this directory. " +
-  "Use the `vibe` CLI for infrastructure and run `vibe ship` to deploy when ready. " +
+  "Use the `vibe` CLI for infrastructure and run `vibe ship` to deploy when ready, " +
+  "then run `vibe ci` to monitor the GitHub Actions build. If CI fails, read the log " +
+  "output, fix the issue, and run `vibe ship` again. " +
   "Keep readModels in vibe.app.yaml current and .vibe-memory/ up to date.";
 
 const CHAT_PREAMBLE =
@@ -254,7 +258,8 @@ const CHAT_PREAMBLE =
   "Run `vibe apps` to list available apps, `vibe platform` for an overview, " +
   "`vibe platform app <id>` for details on one app, and `vibe query <model> --app <id>` to read data. " +
   "Determine from the user's message whether to answer a question, build a new app (`vibe init`), " +
-  "or modify an existing one. For code changes, make edits and run `vibe ship` to deploy when ready. " +
+  "or modify an existing one. For code changes, make edits, run `vibe ship` to deploy, then `vibe ci` " +
+  "to monitor the GitHub Actions build (fix and re-ship if it fails). " +
   "Follow AGENTS.md if present and keep .vibe-memory/ up to date in any app you touch.\n\n" +
   "When building a NEW app: " +
   "(1) Add an `icon` field to vibe.app.yaml with a self-contained SVG that visually represents the app. " +

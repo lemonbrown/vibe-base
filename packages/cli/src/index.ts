@@ -6,6 +6,7 @@ import {
   cmdAgentSetWorkspace,
   cmdAgentStatus,
   cmdApps,
+  cmdCi,
   cmdContext,
   cmdDelete,
   cmdDeploy,
@@ -66,6 +67,11 @@ program
   .description("Deploy: connect to GitHub on first run, then commit + push (one command)")
   .option("-m, --message <message>", "commit message")
   .action(wrap((opts: { message?: string }) => cmdShip(opts)));
+
+program
+  .command("ci")
+  .description("Wait for the GitHub Actions build to finish; print logs on failure")
+  .action(wrap(cmdCi));
 
 program
   .command("deploy")
