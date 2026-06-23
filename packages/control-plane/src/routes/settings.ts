@@ -9,14 +9,17 @@ interface SettingsRow {
   plan_mode_default: boolean;
   llm_provider: string;
   llm_model: string;
+  llm_reasoning_effort: string | null;
 }
 
 const PROVIDERS: LlmProvider[] = ["claude", "codex"];
+const VALID_REASONING_EFFORTS = ["low", "medium", "high"];
 const DEFAULTS: OwnerSettings = {
   stackPolicy: "",
   planModeDefault: false,
   llmProvider: "claude",
   llmModel: "sonnet",
+  llmReasoningEffort: null,
 };
 
 function normalizeProvider(value: unknown, fallback: LlmProvider): LlmProvider {
@@ -36,13 +39,17 @@ function toSettings(row: SettingsRow | null): OwnerSettings {
     planModeDefault: row.plan_mode_default,
     llmProvider: normalizeProvider(row.llm_provider, DEFAULTS.llmProvider),
     llmModel: normalizeModel(row.llm_model, DEFAULTS.llmModel),
+    llmReasoningEffort:
+      row.llm_reasoning_effort && VALID_REASONING_EFFORTS.includes(row.llm_reasoning_effort)
+        ? row.llm_reasoning_effort
+        : null,
   };
 }
 
 /** Load the owner's chat settings, or platform defaults if none saved yet. */
 export async function loadOwnerSettings(email: string): Promise<OwnerSettings> {
   const row = await one<SettingsRow>(
-    "SELECT stack_policy, plan_mode_default, llm_provider, llm_model FROM owner_settings WHERE owner_email = $1",
+    "SELECT stack_policy, plan_mode_default, llm_provider, llm_model, llm_reasoning_effort FROM owner_settings WHERE owner_email = $1",
     [email]
   );
   return toSettings(row);
@@ -61,6 +68,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       planModeDefault?: boolean;
       llmProvider?: string;
       llmModel?: string;
+      llmReasoningEffort?: string | null;
     };
   }>(
     "/api/settings",
@@ -80,21 +88,28 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
           : current.planModeDefault;
       const llmProvider = normalizeProvider(req.body?.llmProvider, current.llmProvider);
       const llmModel = normalizeModel(req.body?.llmModel, current.llmModel);
+      const llmReasoningEffort =
+        req.body && "llmReasoningEffort" in req.body
+          ? (VALID_REASONING_EFFORTS.includes(req.body.llmReasoningEffort as string)
+              ? (req.body.llmReasoningEffort as string)
+              : null)
+          : current.llmReasoningEffort;
 
       await query(
-        `INSERT INTO owner_settings (owner_email, stack_policy, plan_mode_default, llm_provider, llm_model, updated_at)
-         VALUES ($1, $2, $3, $4, $5, now())
+        `INSERT INTO owner_settings (owner_email, stack_policy, plan_mode_default, llm_provider, llm_model, llm_reasoning_effort, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, now())
          ON CONFLICT (owner_email) DO UPDATE SET
            stack_policy = EXCLUDED.stack_policy,
            plan_mode_default = EXCLUDED.plan_mode_default,
            llm_provider = EXCLUDED.llm_provider,
            llm_model = EXCLUDED.llm_model,
+           llm_reasoning_effort = EXCLUDED.llm_reasoning_effort,
            updated_at = now()`,
-        [actor.email, stackPolicy, planModeDefault, llmProvider, llmModel]
+        [actor.email, stackPolicy, planModeDefault, llmProvider, llmModel, llmReasoningEffort]
       );
       await audit({ actorEmail: actor.email, action: "settings.update" });
 
-      return reply.send({ settings: { stackPolicy, planModeDefault, llmProvider, llmModel } });
+      return reply.send({ settings: { stackPolicy, planModeDefault, llmProvider, llmModel, llmReasoningEffort } });
     }
   );
 }

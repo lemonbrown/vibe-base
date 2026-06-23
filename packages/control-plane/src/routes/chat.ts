@@ -11,7 +11,7 @@ import { requireUser } from "./guards.js";
 import { loadOwnerSettings } from "./settings.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const VALID_KINDS: JobKind[] = ["ask", "build", "adjust"];
+const VALID_KINDS: JobKind[] = ["chat", "ask", "build", "adjust"];
 
 interface ConvRow {
   id: string;
@@ -109,18 +109,15 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     if (!content) return reply.code(400).send({ error: "content is required" });
     const kind = (VALID_KINDS as string[]).includes(req.body?.kind ?? "")
       ? (req.body!.kind as JobKind)
-      : "ask";
+      : "chat";
     const targetApp = req.body?.targetApp ?? conv.target_app;
 
     // Snapshot the owner's settings onto the job so later edits never rewrite
-    // in-flight work. The stack policy only applies where tech choices matter.
+    // in-flight work.
     const settings = await loadOwnerSettings(actor.email);
     const planMode =
       typeof req.body?.planMode === "boolean" ? req.body.planMode : settings.planModeDefault;
-    const stackPolicy =
-      (kind === "build" || kind === "adjust") && settings.stackPolicy.trim()
-        ? settings.stackPolicy
-        : null;
+    const stackPolicy = settings.stackPolicy.trim() ? settings.stackPolicy : null;
 
     const userMsgId = shortId("msg");
     const asstMsgId = shortId("msg");
@@ -137,9 +134,9 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     await query(
       `INSERT INTO jobs (
          id, conv_id, message_id, kind, target_app, instruction, claude_session_id,
-         plan_mode, stack_policy, llm_provider, llm_model
+         plan_mode, stack_policy, llm_provider, llm_model, llm_reasoning_effort
        )
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [
         jobId,
         conv.id,
@@ -152,6 +149,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         stackPolicy,
         settings.llmProvider,
         settings.llmModel,
+        settings.llmReasoningEffort,
       ]
     );
 
@@ -209,11 +207,11 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         }
         if (!active) break;
         // Keep-alive comment every ~15s of silence so proxies don't drop us.
-        if (evs.rows.length === 0 && ++idle >= 20) {
+        if (evs.rows.length === 0 && ++idle >= 100) {
           reply.raw.write(": ping\n\n");
           idle = 0;
         }
-        await sleep(750);
+        await sleep(150);
       }
       reply.raw.end();
     }

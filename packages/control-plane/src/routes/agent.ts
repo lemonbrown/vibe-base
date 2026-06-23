@@ -22,6 +22,7 @@ interface JobRow {
   llm_model: string;
   plan_mode: boolean;
   stack_policy: string | null;
+  llm_reasoning_effort: string | null;
 }
 
 const PROVIDERS: LlmProvider[] = ["claude", "codex"];
@@ -43,6 +44,7 @@ function toAgentJob(row: JobRow): AgentJob {
     llmSessionId: row.claude_session_id,
     planMode: row.plan_mode,
     stackPolicy: row.stack_policy,
+    llmReasoningEffort: row.llm_reasoning_effort,
   };
 }
 
@@ -55,7 +57,7 @@ async function claimNext(machineId: string): Promise<JobRow | null> {
           ORDER BY created_at ASC
           FOR UPDATE SKIP LOCKED LIMIT 1
        )
-       RETURNING id, conv_id, message_id, kind, target_app, instruction, claude_session_id, llm_provider, llm_model, plan_mode, stack_policy`,
+       RETURNING id, conv_id, message_id, kind, target_app, instruction, claude_session_id, llm_provider, llm_model, plan_mode, stack_policy, llm_reasoning_effort`,
     [machineId]
   );
   return res.rows[0] ?? null;

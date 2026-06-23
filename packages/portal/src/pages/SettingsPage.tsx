@@ -5,9 +5,29 @@ import { Card, Toggle } from "../components/ui";
 import { InlineError, LoadingBlock } from "../components/States";
 
 const MODEL_PRESETS: Record<LlmProvider, string[]> = {
-  claude: ["sonnet", "opus"],
-  codex: ["gpt-5", "gpt-5.1", "gpt-5.4", "gpt-5.5"],
+  claude: [
+    "claude-sonnet-4-6",
+    "claude-opus-4-8",
+    "claude-haiku-4-5-20251001",
+  ],
+  codex: [
+    "o4-mini",
+    "o3",
+    "o3-mini",
+    "o1",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4o",
+    "gpt-4o-mini",
+  ],
 };
+
+const REASONING_MODELS = new Set(["o4-mini", "o3", "o3-mini", "o1", "o1-mini", "o3-pro"]);
+
+function isReasoningModel(model: string): boolean {
+  // o-series models start with "o" followed by a digit
+  return REASONING_MODELS.has(model) || /^o\d/.test(model);
+}
 
 export function SettingsPage() {
   const { data: settings, isLoading, error } = useSettings();
@@ -16,7 +36,8 @@ export function SettingsPage() {
   const [stackPolicy, setStackPolicy] = useState("");
   const [planModeDefault, setPlanModeDefault] = useState(false);
   const [llmProvider, setLlmProvider] = useState<LlmProvider>("claude");
-  const [llmModel, setLlmModel] = useState("sonnet");
+  const [llmModel, setLlmModel] = useState("claude-sonnet-4-6");
+  const [llmReasoningEffort, setLlmReasoningEffort] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState(0);
 
   // Seed local form state once settings load.
@@ -26,6 +47,7 @@ export function SettingsPage() {
       setPlanModeDefault(settings.planModeDefault);
       setLlmProvider(settings.llmProvider);
       setLlmModel(settings.llmModel);
+      setLlmReasoningEffort(settings.llmReasoningEffort);
     }
   }, [settings]);
 
@@ -34,13 +56,16 @@ export function SettingsPage() {
     (stackPolicy !== settings.stackPolicy ||
       planModeDefault !== settings.planModeDefault ||
       llmProvider !== settings.llmProvider ||
-      llmModel !== settings.llmModel);
+      llmModel !== settings.llmModel ||
+      llmReasoningEffort !== settings.llmReasoningEffort);
 
   const save = () =>
     update.mutate(
-      { stackPolicy, planModeDefault, llmProvider, llmModel },
+      { stackPolicy, planModeDefault, llmProvider, llmModel, llmReasoningEffort },
       { onSuccess: () => setSavedAt(Date.now()) }
     );
+
+  const showReasoningEffort = llmProvider === "codex" && isReasoningModel(llmModel);
 
   if (isLoading) return <LoadingBlock label="Loading settings…" />;
   if (error) return <InlineError message={(error as Error).message} />;
@@ -71,6 +96,7 @@ export function SettingsPage() {
                 const provider = e.target.value as LlmProvider;
                 setLlmProvider(provider);
                 setLlmModel(MODEL_PRESETS[provider][0] ?? "");
+                setLlmReasoningEffort(null);
               }}
             >
               <option value="claude">Claude</option>
@@ -85,8 +111,11 @@ export function SettingsPage() {
               className="input"
               list="llm-model-presets"
               value={llmModel}
-              onChange={(e) => setLlmModel(e.target.value)}
-              placeholder={llmProvider === "claude" ? "sonnet" : "gpt-5"}
+              onChange={(e) => {
+                setLlmModel(e.target.value);
+                if (!isReasoningModel(e.target.value)) setLlmReasoningEffort(null);
+              }}
+              placeholder={llmProvider === "claude" ? "claude-sonnet-4-6" : "o4-mini"}
             />
             <datalist id="llm-model-presets">
               {MODEL_PRESETS[llmProvider].map((model) => (
@@ -95,12 +124,35 @@ export function SettingsPage() {
             </datalist>
           </label>
         </div>
+
+        {showReasoningEffort && (
+          <div className="mt-3">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
+                Reasoning effort
+              </span>
+              <select
+                className="input"
+                value={llmReasoningEffort ?? ""}
+                onChange={(e) => setLlmReasoningEffort(e.target.value || null)}
+              >
+                <option value="">Default</option>
+                <option value="low">Low — fast, lighter reasoning</option>
+                <option value="medium">Medium</option>
+                <option value="high">High — slower, deeper reasoning</option>
+              </select>
+            </label>
+            <p className="mt-1 text-xs text-[var(--color-faint)]">
+              Controls how much the model "thinks" before responding. Only applies to o-series models.
+            </p>
+          </div>
+        )}
       </Card>
 
       <Card title="Stack policy">
         <p className="mb-3 text-sm text-[var(--color-muted)]">
-          Free-text preferences injected into <b>Build</b> and <b>Adjust</b> chats
-          so you don't have to repeat them. The model reads this as guidance.
+          Free-text preferences injected into every chat so you don't have to repeat them.
+          The model reads this as guidance on tech choices, conventions, and constraints.
         </p>
         <textarea
           className="input min-h-[120px] resize-y font-mono text-[13px] leading-relaxed"
@@ -108,9 +160,6 @@ export function SettingsPage() {
           value={stackPolicy}
           onChange={(e) => setStackPolicy(e.target.value)}
         />
-        <p className="mt-2 text-xs text-[var(--color-faint)]">
-          Not used for read-only <b>Ask</b> questions.
-        </p>
       </Card>
 
       <Card title="Plan mode">

@@ -231,6 +231,13 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE jobs ADD COLUMN IF NOT EXISTS llm_model    TEXT NOT NULL DEFAULT 'sonnet';
     `,
   },
+  {
+    id: "0007_reasoning_effort",
+    sql: `
+      ALTER TABLE owner_settings ADD COLUMN IF NOT EXISTS llm_reasoning_effort TEXT DEFAULT NULL;
+      ALTER TABLE jobs           ADD COLUMN IF NOT EXISTS llm_reasoning_effort TEXT DEFAULT NULL;
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

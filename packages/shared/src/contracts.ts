@@ -188,8 +188,8 @@ export interface ReadModelResult {
  * assistant message.
  */
 
-/** ask = read-only data/platform question; build = new app; adjust = edit app. */
-export type JobKind = "ask" | "build" | "adjust";
+/** chat = LLM infers intent; ask = read-only question; build = new app; adjust = edit app. */
+export type JobKind = "chat" | "ask" | "build" | "adjust";
 export type JobStatus = "queued" | "claimed" | "running" | "done" | "failed";
 export type MessageRole = "user" | "assistant";
 export type MessageStatus = "pending" | "streaming" | "done" | "failed";
@@ -218,8 +218,8 @@ export interface ConversationDetail extends Conversation {
 /** A streamed event from the daemon as the selected LLM works (no secrets). */
 export interface JobEvent {
   seq: number;
-  /** text = assistant output chunk; tool = a tool call; status/error/done = lifecycle. */
-  type: "text" | "tool" | "status" | "error" | "done";
+  /** text = assistant output chunk; tool = a tool call; thinking = reasoning trace; status/error/done = lifecycle. */
+  type: "text" | "tool" | "thinking" | "status" | "error" | "done";
   data: Record<string, unknown>;
 }
 
@@ -247,14 +247,15 @@ export interface AgentJob {
   llmSessionId: string | null;
   /** When true, run the provider in plan/research mode instead of editing/executing. */
   planMode: boolean;
-  /** Stack/preferences policy to append to the provider prompt (build/adjust
-   *  only; null otherwise). Snapshotted from owner settings at send time. */
+  /** Stack/preferences policy to append to the provider prompt. Snapshotted from owner settings at send time. */
   stackPolicy: string | null;
+  /** Reasoning effort for providers that support it (e.g. OpenAI o-series). null = use provider default. */
+  llmReasoningEffort: string | null;
 }
 
 /** Per-owner chat settings configured from the portal. */
 export interface OwnerSettings {
-  /** Free-text stack/preferences injected into build + adjust jobs. */
+  /** Free-text stack/preferences injected into chat jobs. */
   stackPolicy: string;
   /** Initial state of the chat composer's plan-mode toggle. */
   planModeDefault: boolean;
@@ -262,4 +263,6 @@ export interface OwnerSettings {
   llmProvider: LlmProvider;
   /** Default provider model id or alias for new chat jobs. */
   llmModel: string;
+  /** Reasoning effort level for providers that support it (OpenAI o-series). null = use provider default. */
+  llmReasoningEffort: string | null;
 }

@@ -1,9 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ChatMessage, JobKind } from "@vibe/shared";
 import {
-  useApps,
   useConversation,
   useMachineStatus,
   useSendMessage,
@@ -21,6 +20,7 @@ import { LoadingBlock, Spinner } from "../components/States";
 interface Live {
   asstId: string;
   text: string;
+  thinking: string;
   tools: string[];
   error?: string;
   active: boolean;
@@ -87,11 +87,32 @@ function Caret() {
   );
 }
 
+function ThinkingBlock({ text, active }: { text: string; active: boolean }) {
+  const [open, setOpen] = useState(false);
+  const toggle = useCallback(() => setOpen((v) => !v), []);
+  return (
+    <div className="mb-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] text-xs">
+      <button
+        onClick={toggle}
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[var(--color-muted)] hover:text-[var(--color-text)]"
+      >
+        <span className={active && !text ? "animate-pulse" : ""}>{active && !text ? "⏳" : "💭"}</span>
+        <span className="flex-1 font-medium">{active && !text ? "Thinking…" : "Thinking"}</span>
+        {text && <span className="text-[var(--color-faint)]">{open ? "▲" : "▼"}</span>}
+      </button>
+      {open && text && (
+        <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words px-3 pb-2 font-mono text-[var(--color-faint)] leading-relaxed">
+          {text}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 export function ChatPage() {
   const { id = "" } = useParams();
   const qc = useQueryClient();
   const { data: conv, isLoading, refetch } = useConversation(id);
-  const { data: apps } = useApps();
   const { data: machine, isLoading: mLoading } = useMachineStatus();
   const send = useSendMessage(id);
 
@@ -110,13 +131,15 @@ export function ChatPage() {
 
   const startStream = (asstId: string) => {
     disposeRef.current?.();
-    setLive({ asstId, text: "", tools: [], active: true });
+    setLive({ asstId, text: "", thinking: "", tools: [], active: true });
     disposeRef.current = streamJob(id, 0, {
       onEvent: (e) =>
         setLive((cur) => {
           if (!cur || cur.asstId !== asstId) return cur;
           if (e.type === "text")
             return { ...cur, text: cur.text + (typeof e.data.text === "string" ? e.data.text : "") };
+          if (e.type === "thinking")
+            return { ...cur, thinking: cur.thinking + (typeof e.data.text === "string" ? e.data.text : "") };
           if (e.type === "tool")
             return { ...cur, tools: [...cur.tools, String(e.data.name ?? "tool")] };
           if (e.type === "error")
@@ -167,7 +190,7 @@ export function ChatPage() {
     if (send.isPending || live?.active) return;
     onSend(
       action.prompt,
-      action.kind ?? "ask",
+      action.kind ?? "chat",
       action.targetApp === undefined ? conv?.targetApp ?? null : action.targetApp,
       action.planMode ?? false
     );
@@ -181,7 +204,7 @@ export function ChatPage() {
   // Auto-scroll to the newest content as it streams in.
   useLayoutEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [thread.length, live?.text, live?.tools.length]);
+  }, [thread.length, live?.text, live?.thinking, live?.tools.length]);
 
   if (isLoading) return <LoadingBlock label="Loading conversation…" />;
   if (!conv)
@@ -226,6 +249,9 @@ export function ChatPage() {
             return (
               <div key={m.id}>
                 <Bubble role="assistant" tools={live!.tools} streaming={live!.active} status={m.status}>
+                  {(live!.thinking || (live!.active && !live!.text)) && (
+                    <ThinkingBlock text={live!.thinking} active={live!.active} />
+                  )}
                   {live!.text ? (
                     <MarkdownMessage
                       content={live!.text}
@@ -233,9 +259,9 @@ export function ChatPage() {
                       triggersDisabled={live!.active || send.isPending}
                       onTrigger={onTrigger}
                     />
-                  ) : (
+                  ) : !live!.thinking && (
                     <span className="inline-flex items-center gap-2 text-[var(--color-muted)]">
-                      <Spinner /> thinking…
+                      <Spinner /> waiting for agent…
                     </span>
                   )}
                 </Bubble>
@@ -270,8 +296,6 @@ export function ChatPage() {
       )}
 
       <Composer
-        apps={apps ?? []}
-        defaultTargetApp={conv.targetApp}
         sending={send.isPending}
         onSend={onSend}
       />

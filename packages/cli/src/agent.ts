@@ -67,9 +67,11 @@ export function parseStreamLine(line: string): ParsedLine | null {
   } else if (type === "assistant" && obj.message) {
     const content = (obj.message as { content?: unknown[] }).content ?? [];
     for (const raw of content) {
-      const block = raw as { type?: string; text?: string; name?: string; input?: unknown };
+      const block = raw as { type?: string; text?: string; thinking?: string; name?: string; input?: unknown };
       if (block.type === "text" && block.text) {
         events.push({ seq: 0, type: "text", data: { text: block.text } });
+      } else if (block.type === "thinking" && block.thinking) {
+        events.push({ seq: 0, type: "thinking", data: { text: block.thinking } });
       } else if (block.type === "tool_use") {
         events.push({ seq: 0, type: "tool", data: { name: block.name, input: block.input } });
       }
@@ -151,6 +153,14 @@ const ADJUST_PREAMBLE =
   "Use the `vibe` CLI for infrastructure and run `vibe ship` to deploy when ready. " +
   "Keep readModels in vibe.app.yaml current and .vibe-memory/ up to date.";
 
+const CHAT_PREAMBLE =
+  "You are a Vibe Base assistant with full access to the workspace. " +
+  "Run `vibe apps` to list available apps, `vibe platform` for an overview, " +
+  "`vibe platform app <id>` for details on one app, and `vibe query <model> --app <id>` to read data. " +
+  "Determine from the user's message whether to answer a question, build a new app (`vibe init`), " +
+  "or modify an existing one. For code changes, make edits and run `vibe ship` to deploy when ready. " +
+  "Follow AGENTS.md if present and keep .vibe-memory/ up to date in any app you touch.";
+
 function portalUiPreamble(job: AgentJob): string {
   const target = job.targetApp ? `"${job.targetApp}"` : "null";
   return [
@@ -207,6 +217,17 @@ function portalUiPreamble(job: AgentJob): string {
 /** Decide where to run and with what tools, creating dirs for new apps. */
 async function planJob(job: AgentJob, cfg: AgentConfig): Promise<Plan> {
   const kind: JobKind = job.kind;
+
+  if (kind === "chat") {
+    await mkdir(cfg.workspaceRoot, { recursive: true });
+    return {
+      cwd: cfg.workspaceRoot,
+      allowedTools: WRITE_TOOLS,
+      permissionMode: "acceptEdits",
+      preamble: CHAT_PREAMBLE,
+    };
+  }
+
   if (kind === "ask") {
     await mkdir(cfg.workspaceRoot, { recursive: true });
     return {
@@ -357,6 +378,7 @@ async function runCodex(
 
   args.push("--json", "--skip-git-repo-check", "-o", outFile);
   if (job.llmModel.trim()) args.push("--model", job.llmModel.trim());
+  if (job.llmReasoningEffort) args.push("--reasoning-effort", job.llmReasoningEffort);
   if (job.kind !== "ask" && !job.planMode) {
     args.push("--dangerously-bypass-approvals-and-sandbox");
   } else if (!job.llmSessionId) {
@@ -450,12 +472,12 @@ async function runJob(job: AgentJob, cfg: AgentConfig): Promise<void> {
   const enqueue = (events: JobEvent[]): void => {
     if (!events.length) return;
     queue.push(...events);
-    if (queue.length >= 8) flushing = flushing.then(flush);
+    if (queue.length >= 2) flushing = flushing.then(flush);
   };
 
   const ticker = setInterval(() => {
     flushing = flushing.then(flush);
-  }, 500);
+  }, 100);
 
   log(
     `  -> ${job.llmProvider} ${job.llmModel} (${job.kind}${job.planMode ? ", plan" : ""}) in ${plan.cwd}`
