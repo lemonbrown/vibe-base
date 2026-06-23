@@ -14,6 +14,8 @@
     "build": "npm run build --workspaces --if-present",
     "typecheck": "tsc -b",
     "dev:control-plane": "npm run dev --workspace @vibe/control-plane",
+    "dev:portal": "bun run --cwd packages/portal dev",
+    "build:portal": "bun run --cwd packages/portal build",
     "cli": "npm run --silent start --workspace @vibe/cli --"
   }
 }

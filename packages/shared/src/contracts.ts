@@ -221,6 +221,14 @@ export interface JobEvent {
   data: Record<string, unknown>;
 }
 
+/** The owner's registered relay machine and whether its daemon is reachable. */
+export interface MachineStatus {
+  name: string;
+  lastSeenAt: string | null;
+  /** True when the daemon checked in recently (heartbeat within the window). */
+  online: boolean;
+}
+
 /** A unit of work handed to a daemon. */
 export interface AgentJob {
   id: string;

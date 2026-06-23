@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+/* Dark-first. The <html> carries `dark` and tokens below define the surface. */
+
+@theme {
+  --color-bg: #0b0d12;
+  --color-surface: #11141c;
+  --color-surface-2: #161a24;
+  --color-border: #1f2533;
+  --color-border-strong: #2a3043;
+  --color-text: #e7e9ee;
+  --color-muted: #8b93a7;
+  --color-faint: #5b6478;
+
+  --color-brand: #5b7cff;
+  --color-brand-strong: #4a6bff;
+  --color-brand-soft: #1a2142;
+
+  --color-ok: #5fe3a1;
+  --color-warn: #ffcd6b;
+  --color-bad: #ff7a85;
+
+  --radius-card: 14px;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono",
+    Menlo, monospace;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* Respect mobile safe areas (notch / home indicator). */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+      env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  ::selection {
+    background: var(--color-brand-soft);
+  }
+
+  /* Subtle, modern scrollbars in dark surfaces. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)];
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-bg)]
+      px-3 py-2 text-sm text-[var(--color-text)] outline-none
+      placeholder:text-[var(--color-faint)]
+      focus:border-[var(--color-brand)] focus:ring-2 focus:ring-[var(--color-brand-soft)];
+  }
+
+  .btn,
+  .btn-primary,
+  .btn-ghost,
+  .btn-danger {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg px-4 py-2
+      text-sm font-medium transition-colors select-none
+      disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-[var(--color-brand)] text-white hover:bg-[var(--color-brand-strong)];
+  }
+  .btn-ghost {
+    @apply border border-[var(--color-border-strong)] text-[var(--color-text)]
+      hover:bg-[var(--color-surface-2)];
+  }
+  .btn-danger {
+    @apply bg-[#b3303c] text-white hover:bg-[#c9384a];
+  }
+
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border-strong)]
+      px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .section-title {
+    @apply text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)];
+  }
+}

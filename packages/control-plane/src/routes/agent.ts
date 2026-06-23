@@ -1,8 +1,11 @@
 import type { FastifyInstance } from "fastify";
-import type { AgentJob, JobEvent } from "@vibe/shared";
+import type { AgentJob, JobEvent, MachineStatus } from "@vibe/shared";
 import { one, query } from "../db.js";
 import { shortId } from "../lib/ids.js";
 import { requireOwner } from "./guards.js";
+
+/** A machine is considered online if it checked in within this window. */
+const ONLINE_WINDOW_MS = 90_000;
 
 const CLAIM_POLL_MS = 1000;
 const CLAIM_TIMEOUT_MS = 25_000;
@@ -66,6 +69,25 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
       [id, actor.email, name]
     );
     return reply.send({ machineId: id, name });
+  });
+
+  // The owner's relay machine + whether its daemon is reachable. Drives the
+  // chat's online/offline pill. Returns the most recently seen machine.
+  app.get("/api/agent/status", async (req, reply) => {
+    const actor = await requireOwner(req, reply);
+    if (!actor) return;
+    const row = await one<{ name: string; last_seen_at: Date | null }>(
+      "SELECT name, last_seen_at FROM machines WHERE owner_email = $1 ORDER BY last_seen_at DESC NULLS LAST LIMIT 1",
+      [actor.email]
+    );
+    const machine: MachineStatus | null = row
+      ? {
+          name: row.name,
+          lastSeenAt: row.last_seen_at ? row.last_seen_at.toISOString() : null,
+          online: !!row.last_seen_at && Date.now() - row.last_seen_at.getTime() < ONLINE_WINDOW_MS,
+        }
+      : null;
+    return reply.send({ machine });
   });
 
   app.post<{ Body: { machineId?: string } }>("/api/agent/heartbeat", async (req, reply) => {

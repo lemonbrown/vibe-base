@@ -1,11 +1,16 @@
 # --- build the monorepo ---
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
+# Bun builds the portal SPA (its dev/build runner); grab just the binary.
+COPY --from=oven/bun:1 /usr/local/bin/bun /usr/local/bin/bun
 # Copy the full workspace (node_modules/dist are excluded via .dockerignore),
 # then install so the @vibe/* workspace links resolve exactly as they do locally.
 COPY . .
 RUN npm install
 RUN npm run build --workspace @vibe/shared && npm run build --workspace @vibe/control-plane
+# Build the React/Vite owner portal → packages/portal/dist (served by the
+# control plane behind the owner session).
+RUN bun run --cwd packages/portal build
 
 # --- runtime ---
 FROM node:22-bookworm-slim AS runtime

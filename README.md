@@ -34,8 +34,11 @@ subdomain, log in, read its state with an LLM*:
 - **Gateway auth** — every app sits behind Caddy `forward_auth` → the control
   plane's `/authz`. Apps never implement login; they read the signed-in user
   from `X-Vibe-User-Email` / `X-Vibe-User-Role` headers. Invite-only by default.
-- **Owner portal** — served by the control plane behind the same session: app
-  list, app detail (status, logs, members, invite, rollback).
+- **Owner portal** — a mobile-friendly React/Vite SPA (`packages/portal`) served
+  by the control plane behind the same session: app list, app detail (status,
+  logs, members, invite, rollback), and the LLM chat. It calls the `/api/*` JSON
+  layer with the session cookie; the control plane serves its built `dist`
+  (gated) and falls back to `index.html` for client-side routes.
 - **LLM-readable project files** — `vibe.app.yaml`, `AGENTS.md`, `.vibe-memory/`.
 
 Apps can also send email: enable `capabilities.email` and the platform injects
@@ -255,6 +258,22 @@ bring their own).
 via `DATABASE_URL` and (for deploys) a Docker daemon. Caddy/MinIO are optional
 for API work — the control plane logs a warning and continues if Caddy's admin
 API isn't reachable.
+
+### Portal (web UI)
+
+The portal lives in `packages/portal` (Vite + React + TypeScript + Tailwind, run
+with **Bun**). `npm install` at the repo root installs its deps as a workspace.
+
+```bash
+npm run build:portal          # build the SPA → packages/portal/dist (bun + vite)
+npm run dev:portal            # hot-reload dev server (proxies /api → :8080)
+```
+
+In production the control plane serves the built `dist` itself, behind the owner
+session. `npm run build` (and the control-plane Docker image) build the portal
+automatically; set `PORTAL_DIST` to override where the control plane looks for
+it. With no build present, the control plane logs a warning and the API still
+runs (the UI is just disabled).
 
 ## Deploying to a DigitalOcean droplet
 
