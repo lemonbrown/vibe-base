@@ -190,7 +190,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
   app.post<{
     Params: { id: string };
     Body: {
-      status?: "done" | "failed";
+      status?: "done" | "failed" | "stopped";
       error?: string;
       claudeSessionId?: string;
       llmSessionId?: string;
