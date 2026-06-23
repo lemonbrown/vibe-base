@@ -52,17 +52,19 @@ export function extractProgressLine(output: string): string {
 
   // Docker step headers are the most useful progress signal
   for (let i = lines.length - 1; i >= 0; i--) {
-    if (/^Step \d+\/\d+\b/.test(lines[i])) return lines[i].slice(0, 140);
+    const l = lines[i]!;
+    if (/^Step \d+\/\d+\b/.test(l)) return l.slice(0, 140);
   }
 
   // Skip registry pull noise, sha256 digests, and very short tokens
   const noise =
     /^(#\d+\b|sha256:|---> |Successfully built|Successfully tagged|Removing intermediate|CACHED\b|digest:|status:|Pulling from|Waiting|Verifying Checksum|Downloading|Extracting|Pull complete)/i;
   for (let i = lines.length - 1; i >= 0; i--) {
-    if (!noise.test(lines[i]) && lines[i].length > 4) return lines[i].slice(0, 140);
+    const l = lines[i]!;
+    if (!noise.test(l) && l.length > 4) return l.slice(0, 140);
   }
 
-  return lines[lines.length - 1].slice(0, 140);
+  return lines[lines.length - 1]!.slice(0, 140);
 }
 
 /**
