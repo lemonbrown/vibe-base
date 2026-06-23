@@ -3,6 +3,7 @@ import type { AgentJob, JobEvent, LlmProvider, MachineStatus } from "@vibe/share
 import { one, query } from "../db.js";
 import { shortId } from "../lib/ids.js";
 import { requireOwner } from "./guards.js";
+import { loadOwnerSettings } from "./settings.js";
 
 /** A machine is considered online if it checked in within this window. */
 const ONLINE_WINDOW_MS = 90_000;
@@ -12,7 +13,7 @@ const CLAIM_TIMEOUT_MS = 25_000;
 
 interface JobRow {
   id: string;
-  conv_id: string;
+  conv_id: string | null;
   message_id: string | null;
   kind: string;
   target_app: string | null;
@@ -23,6 +24,7 @@ interface JobRow {
   plan_mode: boolean;
   stack_policy: string | null;
   llm_reasoning_effort: string | null;
+  owner_email: string | null;
 }
 
 const PROVIDERS: LlmProvider[] = ["claude", "codex"];
@@ -34,7 +36,7 @@ function toProvider(value: string): LlmProvider {
 function toAgentJob(row: JobRow): AgentJob {
   return {
     id: row.id,
-    convId: row.conv_id,
+    convId: row.conv_id ?? "",
     messageId: row.message_id,
     kind: row.kind as AgentJob["kind"],
     targetApp: row.target_app,
@@ -57,7 +59,7 @@ async function claimNext(machineId: string): Promise<JobRow | null> {
           ORDER BY created_at ASC
           FOR UPDATE SKIP LOCKED LIMIT 1
        )
-       RETURNING id, conv_id, message_id, kind, target_app, instruction, claude_session_id, llm_provider, llm_model, plan_mode, stack_policy, llm_reasoning_effort`,
+       RETURNING id, conv_id, message_id, kind, target_app, instruction, claude_session_id, llm_provider, llm_model, plan_mode, stack_policy, llm_reasoning_effort, owner_email`,
     [machineId]
   );
   return res.rows[0] ?? null;
@@ -189,7 +191,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
   }>("/api/agent/jobs/:id/complete", async (req, reply) => {
     const actor = await requireOwner(req, reply);
     if (!actor) return;
-    const job = await one<{ conv_id: string; message_id: string | null }>(
+    const job = await one<{ conv_id: string | null; message_id: string | null }>(
       "SELECT conv_id, message_id FROM jobs WHERE id = $1",
       [req.params.id]
     );
@@ -215,7 +217,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
       }
     }
     const sessionId = req.body?.llmSessionId ?? req.body?.claudeSessionId;
-    if (sessionId) {
+    if (sessionId && job.conv_id) {
       await query("UPDATE conversations SET claude_session_id = $2, llm_provider = $3, updated_at = now() WHERE id = $1", [
         job.conv_id,
         sessionId,
@@ -233,5 +235,89 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
       JSON.stringify({ status, error: req.body?.error ?? null }),
     ]);
     return reply.send({ ok: true });
+  });
+
+  // Receive the outcome of a post-deploy verify job. On failure, create an
+  // adjust job so the daemon immediately gets to work on the fixes.
+  app.post<{
+    Params: { id: string };
+    Body: {
+      passed?: boolean;
+      testOutput?: string;
+      screenshotPaths?: Record<string, string>;
+    };
+  }>("/api/agent/jobs/:id/verify-complete", async (req, reply) => {
+    const actor = await requireOwner(req, reply);
+    if (!actor) return;
+
+    const job = await one<{
+      owner_email: string | null;
+      target_app: string | null;
+      instruction: string;
+    }>("SELECT owner_email, target_app, instruction FROM jobs WHERE id = $1", [req.params.id]);
+    if (!job) return reply.code(404).send({ error: "job not found" });
+
+    const passed = req.body?.passed ?? false;
+    await query("UPDATE jobs SET status = $2, completed_at = now() WHERE id = $1", [
+      req.params.id,
+      passed ? "done" : "failed",
+    ]);
+
+    if (passed) return reply.send({ ok: true, adjustJobId: null });
+
+    // Tests failed — resolve the owner email (stored column or instruction JSON fallback).
+    let ownerEmail = job.owner_email;
+    if (!ownerEmail) {
+      try {
+        const parsed = JSON.parse(job.instruction) as { ownerEmail?: string };
+        ownerEmail = parsed.ownerEmail ?? null;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!ownerEmail || !job.target_app) return reply.send({ ok: true, adjustJobId: null });
+
+    const settings = await loadOwnerSettings(ownerEmail);
+    const testOutput = (req.body?.testOutput ?? "").slice(0, 6000);
+    const screenshotPaths = req.body?.screenshotPaths ?? {};
+
+    const screenshotNote = Object.entries(screenshotPaths)
+      .map(([vp, p]) => `  ${vp}: ${p}`)
+      .join("\n");
+
+    const instruction = [
+      `Playwright tests failed after deploying "${job.target_app}". Fix the issues and redeploy with \`vibe ship\`.`,
+      "",
+      "Test output:",
+      testOutput,
+      ...(screenshotNote
+        ? ["", "Screenshots captured on this machine (available for visual inspection):", screenshotNote]
+        : []),
+    ].join("\n");
+
+    const convId = shortId("cnv");
+    await query(
+      "INSERT INTO conversations (id, owner_email, title, target_app) VALUES ($1,$2,$3,$4)",
+      [convId, ownerEmail, `Auto-verify: ${job.target_app}`, job.target_app]
+    );
+    const asstMsgId = shortId("msg");
+    await query(
+      "INSERT INTO messages (id, conv_id, role, content, status) VALUES ($1,$2,'assistant','','pending')",
+      [asstMsgId, convId]
+    );
+    const adjustJobId = shortId("job");
+    await query(
+      `INSERT INTO jobs
+         (id, conv_id, message_id, kind, target_app, instruction, owner_email,
+          plan_mode, stack_policy, llm_provider, llm_model, llm_reasoning_effort)
+       VALUES ($1,$2,$3,'adjust',$4,$5,$6,false,$7,$8,$9,$10)`,
+      [
+        adjustJobId, convId, asstMsgId, job.target_app, instruction, ownerEmail,
+        settings.stackPolicy || null, settings.llmProvider, settings.llmModel,
+        settings.llmReasoningEffort,
+      ]
+    );
+
+    return reply.send({ ok: true, adjustJobId });
   });
 }

@@ -143,7 +143,14 @@ function buildPreamble(appId: string): string {
     `You are building a NEW Vibe Base app with id "${appId}" in this empty directory. ` +
     `First run \`vibe init --name ${appId}\` to scaffold it, then read AGENTS.md and build ` +
     `the app per the request. Declare \`readModels\` in vibe.app.yaml for any data the user ` +
-    `might ask about. When it builds, run \`vibe ship\` to deploy. Use the \`vibe\` CLI for all ` +
+    `might ask about.\n\n` +
+    `Before running \`vibe ship\`, write end-to-end acceptance tests that cover the primary ` +
+    `user flows described in the request. Place them in tests/e2e/smoke.spec.ts using ` +
+    `Playwright's \`@playwright/test\` runner (add it to devDependencies if absent). ` +
+    `Also write playwright.config.ts at the project root — set baseURL from the ` +
+    `PLAYWRIGHT_BASE_URL environment variable, falling back to http://localhost:3000, ` +
+    `and set testDir to "tests/e2e". ` +
+    `Once the app builds, run \`vibe ship\` to deploy. Use the \`vibe\` CLI for all ` +
     `infrastructure and keep .vibe-memory/ up to date.`
   );
 }
@@ -441,11 +448,111 @@ async function runCodex(
   }
 }
 
+/* ----------------------------- verify jobs -------------------------------- */
+
+interface VerifyInstruction {
+  appUrl: string;
+  ownerEmail: string;
+}
+
+async function runPlaywrightTests(
+  appDir: string,
+  appUrl: string
+): Promise<{ passed: boolean; output: string }> {
+  return new Promise((resolve) => {
+    const child = spawnCli(
+      "npx",
+      ["playwright", "test", "tests/e2e/smoke.spec.ts", "--reporter=list"],
+      { cwd: appDir, env: { ...process.env, PLAYWRIGHT_BASE_URL: appUrl, CI: "1" } }
+    );
+    let output = "";
+    child.stdout.on("data", (d: Buffer) => (output += d.toString()));
+    child.stderr.on("data", (d: Buffer) => (output += d.toString()));
+    child.on("close", (code) => resolve({ passed: code === 0, output: output.slice(-8000) }));
+    child.on("error", (err) =>
+      resolve({ passed: false, output: output || (err as Error).message })
+    );
+  });
+}
+
+async function captureScreenshot(url: string, viewportSize: string, outPath: string): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const child = spawnCli(
+      "npx",
+      [
+        "playwright",
+        "screenshot",
+        "--browser", "chromium",
+        "--viewport-size", viewportSize,
+        "--full-page",
+        url,
+        outPath,
+      ],
+      { cwd: join(outPath, "..") }
+    );
+    child.on("close", () => resolve());
+    child.on("error", () => resolve()); // best-effort; don't block on missing Playwright
+  });
+}
+
+async function runVerifyJob(job: AgentJob, cfg: AgentConfig): Promise<void> {
+  let parsed: VerifyInstruction;
+  try {
+    parsed = JSON.parse(job.instruction) as VerifyInstruction;
+  } catch {
+    await api.completeJob(job.id, { status: "failed", error: "invalid verify instruction JSON" });
+    return;
+  }
+
+  const { appUrl } = parsed;
+  const { path: appDir } = resolveAppPath(cfg, job.targetApp!);
+  const verifyDir = join(appDir, ".vibe-verify");
+  await mkdir(verifyDir, { recursive: true });
+
+  log(`  -> verify ${job.targetApp} at ${appUrl}`);
+
+  const testResult = await runPlaywrightTests(appDir, appUrl);
+  log(testResult.passed ? "  ok tests passed" : "  x tests failed");
+
+  const viewports: Array<{ name: string; size: string }> = [
+    { name: "mobile", size: "375, 667" },
+    { name: "tablet", size: "768, 1024" },
+    { name: "desktop", size: "1440, 900" },
+  ];
+  const screenshotPaths: Record<string, string> = {};
+  for (const vp of viewports) {
+    const outPath = join(verifyDir, `${vp.name}.png`);
+    await captureScreenshot(appUrl, vp.size, outPath);
+    screenshotPaths[vp.name] = outPath;
+    log(`  screenshot ${vp.name} -> ${outPath}`);
+  }
+
+  try {
+    const result = await api.completeVerifyJob(job.id, {
+      passed: testResult.passed,
+      testOutput: testResult.output,
+      screenshotPaths,
+    });
+    if (result.adjustJobId) {
+      log(`  queued adjust job ${result.adjustJobId} to fix failures`);
+    }
+  } catch (err) {
+    await api.completeJob(job.id, { status: "failed", error: (err as Error).message });
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+
 /**
  * Run one job with the selected local LLM provider, stream events back to the
  * control plane, and finalize with the provider session id + final answer.
  */
 async function runJob(job: AgentJob, cfg: AgentConfig): Promise<void> {
+  if (job.kind === "verify") {
+    await runVerifyJob(job, cfg);
+    return;
+  }
+
   let plan: Plan;
   try {
     plan = await planJob(job, cfg);

@@ -167,4 +167,18 @@ export const api = {
       finalText?: string;
     }
   ) => call<{ ok: boolean }>("POST", `/api/agent/jobs/${jobId}/complete`, { body }),
+
+  completeVerifyJob: (
+    jobId: string,
+    body: {
+      passed: boolean;
+      testOutput: string;
+      screenshotPaths: Record<string, string>;
+    }
+  ) =>
+    call<{ ok: boolean; adjustJobId: string | null }>(
+      "POST",
+      `/api/agent/jobs/${jobId}/verify-complete`,
+      { body }
+    ),
 };

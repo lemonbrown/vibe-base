@@ -112,11 +112,24 @@ async function reportGithub(
   }
 }
 
+async function enqueueVerifyJob(app: AppRow, ownerEmail: string): Promise<void> {
+  const cfg = loadConfig();
+  const appUrl = `https://${app.subdomain}.${cfg.appsDomain}`;
+  const instruction = JSON.stringify({ appUrl, ownerEmail });
+  const id = shortId("job");
+  await query(
+    `INSERT INTO jobs (id, kind, target_app, instruction, owner_email, status, llm_provider, llm_model)
+     VALUES ($1, 'verify', $2, $3, $4, 'queued', 'claude', 'sonnet')`,
+    [id, app.id, instruction, ownerEmail]
+  );
+}
+
 /** The full deploy pipeline, run in the background after the route returns. */
 async function runDeploy(
   app: AppRow,
   deploymentId: string,
-  source: DeploySource
+  source: DeploySource,
+  ownerEmail?: string
 ): Promise<void> {
   const m = app.manifest;
   const container = `vibe-${app.id}-${deploymentId.replace(/[^a-z0-9]/g, "")}`;
@@ -203,6 +216,8 @@ async function runDeploy(
       [app.id, deploymentId]
     );
 
+    if (ownerEmail) await enqueueVerifyJob(app, ownerEmail);
+
     if (prevDeploy?.container_name && prevDeploy.container_name !== container) {
       // Keep it stopped (not removed) so `vibe deploy rollback` can revive it.
       await stopContainer(prevDeploy.container_name);
@@ -255,7 +270,7 @@ export async function deployRoutes(app: FastifyInstance): Promise<void> {
       await audit({ actorEmail: actor.email, action: "deploy.start", appId: appRow.id, detail: { deploymentId } });
 
       // Run the pipeline in the background; client polls the deployment.
-      void runDeploy(appRow, deploymentId, { kind: "context", tarPath });
+      void runDeploy(appRow, deploymentId, { kind: "context", tarPath }, actor.email);
 
       return reply.code(202).send({ deploymentId, appId: appRow.id });
     }
@@ -302,7 +317,7 @@ export async function deployRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    void runDeploy(appRow, deploymentId, { kind: "image", image, github });
+    void runDeploy(appRow, deploymentId, { kind: "image", image, github }, actor.email);
 
     return reply.code(202).send({ deploymentId, appId: appRow.id });
   });

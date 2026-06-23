@@ -188,8 +188,8 @@ export interface ReadModelResult {
  * assistant message.
  */
 
-/** chat = LLM infers intent; ask = read-only question; build = new app; adjust = edit app. */
-export type JobKind = "chat" | "ask" | "build" | "adjust";
+/** chat = LLM infers intent; ask = read-only question; build = new app; adjust = edit app; verify = post-deploy test run. */
+export type JobKind = "chat" | "ask" | "build" | "adjust" | "verify";
 export type JobStatus = "queued" | "claimed" | "running" | "done" | "failed";
 export type MessageRole = "user" | "assistant";
 export type MessageStatus = "pending" | "streaming" | "done" | "failed";

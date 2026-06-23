@@ -238,6 +238,15 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE jobs           ADD COLUMN IF NOT EXISTS llm_reasoning_effort TEXT DEFAULT NULL;
     `,
   },
+  {
+    // Allow system-triggered verify jobs that have no portal conversation.
+    // owner_email tracks whose settings/queue to use when creating follow-up adjust jobs.
+    id: "0008_verify_jobs",
+    sql: `
+      ALTER TABLE jobs ALTER COLUMN conv_id DROP NOT NULL;
+      ALTER TABLE jobs ADD COLUMN IF NOT EXISTS owner_email TEXT;
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {
