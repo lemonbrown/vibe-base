@@ -179,3 +179,56 @@ export interface ReadModelResult {
   /** True when the result was capped at the row limit. */
   truncated: boolean;
 }
+
+/* ----------------------- API: chat relay (Pattern B) ------------------ */
+/**
+ * The portal chat → control-plane → on-machine daemon relay. A user message
+ * becomes a job that a `vibe agent` daemon on the owner's machine claims, runs
+ * `claude` for, and streams events back to fill the assistant message.
+ */
+
+/** ask = read-only data/platform question; build = new app; adjust = edit app. */
+export type JobKind = "ask" | "build" | "adjust";
+export type JobStatus = "queued" | "claimed" | "running" | "done" | "failed";
+export type MessageRole = "user" | "assistant";
+export type MessageStatus = "pending" | "streaming" | "done" | "failed";
+
+export interface ChatMessage {
+  id: string;
+  role: MessageRole;
+  content: string;
+  status: MessageStatus;
+  createdAt: string;
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  targetApp: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConversationDetail extends Conversation {
+  messages: ChatMessage[];
+}
+
+/** A streamed event from the daemon as `claude` works (no secrets). */
+export interface JobEvent {
+  seq: number;
+  /** text = assistant output chunk; tool = a tool call; status/error/done = lifecycle. */
+  type: "text" | "tool" | "status" | "error" | "done";
+  data: Record<string, unknown>;
+}
+
+/** A unit of work handed to a daemon. */
+export interface AgentJob {
+  id: string;
+  convId: string;
+  messageId: string | null;
+  kind: JobKind;
+  targetApp: string | null;
+  instruction: string;
+  /** Prior `claude` session to resume for multi-turn conversations. */
+  claudeSessionId: string | null;
+}

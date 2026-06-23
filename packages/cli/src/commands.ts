@@ -1,9 +1,11 @@
 import { access, readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, join, resolve as resolvePath } from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { promisify } from "node:util";
 import { parseManifest, validateReadModel, type Manifest } from "@vibe/shared";
+import { runDaemon } from "./agent.js";
+import { agentConfigPath, loadAgentConfig, saveAgentConfig } from "./agentConfig.js";
 import { api, ApiError } from "./client.js";
 import { hasCredentials, saveCredentials } from "./config.js";
 import { detect } from "./detect.js";
@@ -695,6 +697,42 @@ export async function cmdDelete(opts: { yes?: boolean } = {}): Promise<void> {
   log(`Deleting ${m.id}…`);
   await api.deleteApp(m.id);
   log(`\n✓ Deleted ${m.id}. Removed its container, database, storage, and routing.`);
+}
+
+/* -------------------------------- agent ------------------------------- */
+
+/** Run the on-machine daemon: claim chat jobs and run `claude` for them. */
+export async function cmdAgent(opts: { name?: string } = {}): Promise<void> {
+  await runDaemon(opts);
+}
+
+export async function cmdAgentSetWorkspace(path: string): Promise<void> {
+  const cfg = await loadAgentConfig();
+  cfg.workspaceRoot = resolvePath(path);
+  await saveAgentConfig(cfg);
+  log(`Workspace root set to ${cfg.workspaceRoot}`);
+  log("New apps the agent builds will be created under this directory.");
+}
+
+export async function cmdAgentLink(appId: string, path: string): Promise<void> {
+  const cfg = await loadAgentConfig();
+  cfg.apps[appId] = resolvePath(path);
+  await saveAgentConfig(cfg);
+  log(`Linked ${appId} → ${cfg.apps[appId]}`);
+}
+
+export async function cmdAgentStatus(): Promise<void> {
+  const cfg = await loadAgentConfig();
+  log(`Config: ${agentConfigPath()}`);
+  log(`Machine: ${cfg.machineName ?? "(unregistered)"}${cfg.machineId ? ` (${cfg.machineId})` : ""}`);
+  log(`Workspace root: ${cfg.workspaceRoot}`);
+  const entries = Object.entries(cfg.apps);
+  if (entries.length) {
+    log("Linked apps:");
+    for (const [id, p] of entries) log(`  ${id} → ${p}`);
+  } else {
+    log("Linked apps: none (new apps go under the workspace root)");
+  }
 }
 
 /* -------------------------------- login ------------------------------- */

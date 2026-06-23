@@ -51,7 +51,11 @@ function shell(title: string, body: string): string {
   return `<!doctype html><html><head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>${title}</title><style>${STYLE}</style></head><body>
-    <header><div><span class="brand">Vibe</span> Base</div>
+    <header>
+      <div><span class="brand">Vibe</span> Base
+        <a href="/" style="margin-left:18px">Apps</a>
+        <a href="/chat" style="margin-left:12px">Chat</a>
+      </div>
       <form method="post" action="/logout" style="margin:0"><button>Sign out</button></form>
     </header><main>${body}</main></body></html>`;
 }
@@ -236,4 +240,145 @@ export async function portalRoutes(app: FastifyInstance): Promise<void> {
       return reply.redirect("/");
     }
   );
+
+  /* -------------------------------- chat -------------------------------- */
+
+  // Conversation list + start a new chat.
+  app.get("/chat", async (req, reply) => {
+    const actor = await ownerPage(req, reply);
+    if (!actor) return;
+    const convs = await query<{ id: string; title: string; updated_at: Date }>(
+      "SELECT id, title, updated_at FROM conversations WHERE owner_email = $1 ORDER BY updated_at DESC LIMIT 100",
+      [actor.email]
+    );
+    const machine = await query<{ name: string; last_seen_at: Date | null }>(
+      "SELECT name, last_seen_at FROM machines WHERE owner_email = $1 ORDER BY last_seen_at DESC NULLS LAST LIMIT 1",
+      [actor.email]
+    );
+    const online =
+      machine.rows[0]?.last_seen_at &&
+      Date.now() - new Date(machine.rows[0].last_seen_at).getTime() < 90_000;
+    const status = machine.rows[0]
+      ? `Machine <b>${esc(machine.rows[0].name)}</b>: <span class="pill ${online ? "ok" : "bad"}">${online ? "online" : "offline"}</span>`
+      : `<span class="pill warn">no machine registered</span> — run <code>vibe agent</code> on your machine`;
+    const list =
+      convs.rows
+        .map(
+          (c) =>
+            `<tr><td><a href="/chat/${c.id}">${esc(c.title)}</a></td><td>${c.updated_at.toISOString()}</td></tr>`
+        )
+        .join("") || `<tr><td colspan="2">No conversations yet.</td></tr>`;
+    return reply.type("text/html").send(
+      shell(
+        "Chat · Vibe Base",
+        `<h1>Chat</h1>
+         <p>${status}</p>
+         <form class="inline" method="post" action="/chat/new"><button>+ New chat</button></form>
+         <div class="card"><table><tr><th>Conversation</th><th>Updated</th></tr>${list}</table></div>
+         <p style="color:#8b93a7">Messages run your local Claude (via <code>vibe agent</code>) on your machine.</p>`
+      )
+    );
+  });
+
+  app.post("/chat/new", async (req, reply) => {
+    const actor = await ownerPage(req, reply);
+    if (!actor) return;
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      headers: { authorization: `Bearer ${loadConfig().ownerToken}`, "content-type": "application/json" },
+      payload: {},
+    });
+    const id = (res.json() as { conversation?: { id?: string } }).conversation?.id;
+    return reply.redirect(id ? `/chat/${id}` : "/chat");
+  });
+
+  // The chat view: renders history and streams new replies over SSE.
+  app.get<{ Params: { id: string } }>("/chat/:id", async (req, reply) => {
+    const actor = await ownerPage(req, reply);
+    if (!actor) return;
+    const conv = await query<{ id: string; title: string }>(
+      "SELECT id, title FROM conversations WHERE id = $1 AND owner_email = $2",
+      [req.params.id, actor.email]
+    );
+    if (!conv.rows[0])
+      return reply.code(404).type("text/html").send(shell("Not found", "<p>Conversation not found.</p>"));
+    const msgs = await query<{ id: string; role: string; content: string }>(
+      "SELECT id, role, content FROM messages WHERE conv_id = $1 ORDER BY created_at",
+      [req.params.id]
+    );
+    const appRows = await listApps();
+    const appOpts = appRows.map((a) => `<option value="${esc(a.id)}">${esc(a.id)}</option>`).join("");
+    const history = msgs.rows
+      .map((m) => `<div class="msg ${m.role}"><b>${m.role}</b><div>${esc(m.content)}</div></div>`)
+      .join("");
+
+    const body = `
+      <p><a href="/chat">← Conversations</a></p>
+      <h1>${esc(conv.rows[0].title)}</h1>
+      <style>
+        .msg { border:1px solid #1c2130; border-radius:10px; padding:10px 12px; margin:10px 0; white-space:pre-wrap; }
+        .msg.user { background:#10131c; } .msg.assistant { background:#0a1530; }
+        .msg b { display:block; font-size:11px; text-transform:uppercase; color:#8b93a7; margin-bottom:4px; }
+        #composer { position:sticky; bottom:0; background:#0b0d12; padding-top:10px; }
+        #composer textarea { width:100%; min-height:64px; }
+        .row { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+      </style>
+      <div id="log">${history}</div>
+      <div id="composer">
+        <textarea id="text" placeholder="Ask about your data, or describe a change…"></textarea>
+        <div class="row">
+          <select id="kind">
+            <option value="ask">Ask (read-only)</option>
+            <option value="build">Build (new app)</option>
+            <option value="adjust">Adjust (edit app)</option>
+          </select>
+          <select id="app"><option value="">(no app)</option>${appOpts}</select>
+          <button id="send">Send</button>
+        </div>
+      </div>
+      <script>
+        const convId = ${JSON.stringify(req.params.id)};
+        const log = document.getElementById('log');
+        const esc = (s) => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+        function bubble(role, text){
+          const d = document.createElement('div');
+          d.className = 'msg ' + role;
+          d.innerHTML = '<b>'+role+'</b><div></div>';
+          d.querySelector('div').textContent = text;
+          log.appendChild(d); window.scrollTo(0, document.body.scrollHeight);
+          return d.querySelector('div');
+        }
+        async function send(){
+          const text = document.getElementById('text').value.trim();
+          if(!text) return;
+          const kind = document.getElementById('kind').value;
+          const targetApp = document.getElementById('app').value || null;
+          document.getElementById('text').value = '';
+          bubble('user', text);
+          const out = bubble('assistant', '…');
+          const res = await fetch('/api/chat/'+convId+'/messages', {
+            method:'POST', headers:{'content-type':'application/json'},
+            body: JSON.stringify({ content:text, kind, targetApp })
+          });
+          if(!res.ok){ out.textContent = 'Error: '+(await res.text()); return; }
+          out.textContent = '';
+          const ev = new EventSource('/api/chat/'+convId+'/stream');
+          ev.onmessage = (m) => {
+            let e; try { e = JSON.parse(m.data); } catch { return; }
+            if(e.type === 'text'){ out.textContent += (e.data.text || ''); }
+            else if(e.type === 'tool'){ out.textContent += '\\n[' + (e.data.name||'tool') + ']\\n'; }
+            else if(e.type === 'done'){ ev.close(); if(e.data && e.data.error){ out.textContent += '\\n⚠ '+e.data.error; } }
+            window.scrollTo(0, document.body.scrollHeight);
+          };
+          ev.onerror = () => ev.close();
+        }
+        document.getElementById('send').onclick = send;
+        document.getElementById('text').addEventListener('keydown', (e)=>{
+          if(e.key==='Enter' && (e.metaKey||e.ctrlKey)){ e.preventDefault(); send(); }
+        });
+      </script>
+    `;
+    return reply.type("text/html").send(shell(`${conv.rows[0].title} · Chat`, body));
+  });
 }

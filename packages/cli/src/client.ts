@@ -1,7 +1,9 @@
 import type {
+  AgentJob,
   AppStatus,
   AppSummary,
   Deployment,
+  JobEvent,
   Manifest,
   PlatformAppDetail,
   PlatformOverview,
@@ -137,4 +139,26 @@ export const api = {
     call<ReadModelResult>("POST", `/api/platform/apps/${id}/query`, {
       body: { model, params },
     }),
+
+  /* ---- agent / daemon relay (the on-machine `vibe agent` consumes these) ---- */
+
+  registerAgent: (name: string) =>
+    call<{ machineId: string; name: string }>("POST", "/api/agent/register", {
+      body: { name },
+    }),
+
+  agentHeartbeat: (machineId: string) =>
+    call<{ ok: boolean }>("POST", "/api/agent/heartbeat", { body: { machineId } }),
+
+  // Long-poll: resolves with { job } when one is claimed, or {} on timeout.
+  claimJob: (machineId: string) =>
+    call<{ job?: AgentJob }>("GET", `/api/agent/jobs/claim?machine=${encodeURIComponent(machineId)}`),
+
+  postJobEvents: (jobId: string, events: JobEvent[]) =>
+    call<{ ok: boolean }>("POST", `/api/agent/jobs/${jobId}/events`, { body: { events } }),
+
+  completeJob: (
+    jobId: string,
+    body: { status: "done" | "failed"; error?: string; claudeSessionId?: string; finalText?: string }
+  ) => call<{ ok: boolean }>("POST", `/api/agent/jobs/${jobId}/complete`, { body }),
 };

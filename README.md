@@ -122,6 +122,39 @@ and `vibe doctor` flags a database app with missing or invalid read-models. The
 same surface is also served over HTTP under `/api/platform/*` behind the gateway
 session/role model, ready for a portal assistant or remote relay to consume.
 
+## Chat: drive your machine's Claude from the portal
+
+The portal has a **chat** that relays instructions to *your own machine's Claude
+subscription* — so you can build a new app, adjust one, or ask about your live
+data from your phone, with the work (and the tokens) running on your machine.
+
+```
+phone → vibe.example.com/chat ─► control plane (job queue) ◄─ `vibe agent` daemon
+            (assistant reply streamed back over SSE)            runs `claude` on your box
+```
+
+- **`vibe agent`** is a daemon you run on your machine. It registers the machine,
+  long-polls the control plane for jobs, runs `claude --output-format stream-json`
+  in the right directory, and streams events back to the chat. Multi-turn chats
+  resume the same `claude` session.
+- **Three job kinds**, distinguished by working directory + allowed tools:
+  - `ask` — read-only; Claude answers using the `vibe` query CLI. No edits.
+  - `build` — a new app, created at `workspaceRoot/<app-id>`.
+  - `adjust` — edits to an existing app's local directory.
+- **Workspace**: set where new apps are created and map apps that live elsewhere:
+  ```bash
+  vibe agent set-workspace D:/vibe-apps     # base dir for new apps
+  vibe agent link grocery D:/code/grocery   # existing app → its local path
+  vibe agent                                # run the daemon (Ctrl-C to stop)
+  ```
+  Config lives in `~/.vibe/agent.json`. The chat page shows whether your machine
+  is online; with no daemon running, messages queue until it is.
+
+> Trust model (MVP): `build`/`adjust` jobs run `claude` with `acceptEdits` and
+> `Bash` in the app's directory — i.e. autonomous code execution triggered from
+> the portal. Run the daemon only on a machine where that's acceptable. Tighter
+> sandboxing and an approve-on-phone step are the natural next hardening.
+
 ## Architecture
 
 ```

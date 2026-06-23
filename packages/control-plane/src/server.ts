@@ -8,8 +8,10 @@ import formbody from "@fastify/formbody";
 import Fastify, { type FastifyInstance } from "fastify";
 import { loadConfig } from "./config.js";
 import { shortId } from "./lib/ids.js";
+import { agentRoutes } from "./routes/agent.js";
 import { appRoutes } from "./routes/apps.js";
 import { authRoutes } from "./routes/auth.js";
+import { chatRoutes } from "./routes/chat.js";
 import { deployRoutes } from "./routes/deploy.js";
 import { githubRoutes } from "./routes/github.js";
 import { memberRoutes } from "./routes/members.js";
@@ -54,6 +56,8 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(memberRoutes);
   await app.register(statusRoutes);
   await app.register(queryRoutes);
+  await app.register(agentRoutes);
+  await app.register(chatRoutes);
   await app.register(portalRoutes);
 
   return app;

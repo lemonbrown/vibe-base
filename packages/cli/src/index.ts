@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import {
+  cmdAgent,
+  cmdAgentLink,
+  cmdAgentSetWorkspace,
+  cmdAgentStatus,
   cmdApps,
   cmdContext,
   cmdDelete,
@@ -133,6 +137,24 @@ program
       cmdQuery(model, opts)
     )
   );
+
+const agent = program
+  .command("agent")
+  .description("Run the on-machine daemon that runs your local Claude for portal chat jobs")
+  .option("--name <name>", "name to register this machine under")
+  .action(wrap((opts: { name?: string }) => cmdAgent(opts)));
+agent
+  .command("set-workspace <path>")
+  .description("Set the base directory where the agent creates new app folders")
+  .action(wrap((path: string) => cmdAgentSetWorkspace(path)));
+agent
+  .command("link <appId> <path>")
+  .description("Map an existing app id to a local directory")
+  .action(wrap((appId: string, path: string) => cmdAgentLink(appId, path)));
+agent
+  .command("status")
+  .description("Show the agent's workspace + linked apps")
+  .action(wrap(cmdAgentStatus));
 
 const github = program.command("github").description("GitHub integration");
 github

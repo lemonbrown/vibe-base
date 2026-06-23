@@ -136,6 +136,69 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // The chat relay: portal conversations turn into jobs that a daemon on the
+    // owner's machine claims and runs `claude` for, streaming events back.
+    id: "0004_chat_relay",
+    sql: `
+      CREATE TABLE IF NOT EXISTS machines (
+        id           TEXT PRIMARY KEY,
+        owner_email  TEXT NOT NULL,
+        name         TEXT NOT NULL,
+        last_seen_at TIMESTAMPTZ,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+
+      CREATE TABLE IF NOT EXISTS conversations (
+        id                TEXT PRIMARY KEY,
+        owner_email       TEXT NOT NULL,
+        title             TEXT NOT NULL DEFAULT 'New chat',
+        target_app        TEXT,
+        claude_session_id TEXT,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS conversations_owner_idx
+        ON conversations(owner_email, updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS messages (
+        id         TEXT PRIMARY KEY,
+        conv_id    TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        role       TEXT NOT NULL,
+        content    TEXT NOT NULL DEFAULT '',
+        status     TEXT NOT NULL DEFAULT 'done',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS messages_conv_idx ON messages(conv_id, created_at);
+
+      CREATE TABLE IF NOT EXISTS jobs (
+        id                TEXT PRIMARY KEY,
+        conv_id           TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        message_id        TEXT,
+        machine_id        TEXT,
+        kind              TEXT NOT NULL DEFAULT 'ask',
+        target_app        TEXT,
+        instruction       TEXT NOT NULL,
+        claude_session_id TEXT,
+        status            TEXT NOT NULL DEFAULT 'queued',
+        error             TEXT,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+        claimed_at        TIMESTAMPTZ,
+        completed_at      TIMESTAMPTZ
+      );
+      CREATE INDEX IF NOT EXISTS jobs_claim_idx ON jobs(status, created_at);
+
+      CREATE TABLE IF NOT EXISTS job_events (
+        id         BIGSERIAL PRIMARY KEY,
+        job_id     TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        seq        INTEGER NOT NULL,
+        type       TEXT NOT NULL,
+        data       JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS job_events_job_idx ON job_events(job_id, seq);
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {
