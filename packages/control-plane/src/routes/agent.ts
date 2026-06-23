@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import type { AgentJob, JobEvent, MachineStatus } from "@vibe/shared";
+import type { AgentJob, JobEvent, LlmProvider, MachineStatus } from "@vibe/shared";
 import { one, query } from "../db.js";
 import { shortId } from "../lib/ids.js";
 import { requireOwner } from "./guards.js";
@@ -18,8 +18,16 @@ interface JobRow {
   target_app: string | null;
   instruction: string;
   claude_session_id: string | null;
+  llm_provider: string;
+  llm_model: string;
   plan_mode: boolean;
   stack_policy: string | null;
+}
+
+const PROVIDERS: LlmProvider[] = ["claude", "codex"];
+
+function toProvider(value: string): LlmProvider {
+  return (PROVIDERS as string[]).includes(value) ? (value as LlmProvider) : "claude";
 }
 
 function toAgentJob(row: JobRow): AgentJob {
@@ -30,7 +38,9 @@ function toAgentJob(row: JobRow): AgentJob {
     kind: row.kind as AgentJob["kind"],
     targetApp: row.target_app,
     instruction: row.instruction,
-    claudeSessionId: row.claude_session_id,
+    llmProvider: toProvider(row.llm_provider),
+    llmModel: row.llm_model || "sonnet",
+    llmSessionId: row.claude_session_id,
     planMode: row.plan_mode,
     stackPolicy: row.stack_policy,
   };
@@ -45,7 +55,7 @@ async function claimNext(machineId: string): Promise<JobRow | null> {
           ORDER BY created_at ASC
           FOR UPDATE SKIP LOCKED LIMIT 1
        )
-       RETURNING id, conv_id, message_id, kind, target_app, instruction, claude_session_id, plan_mode, stack_policy`,
+       RETURNING id, conv_id, message_id, kind, target_app, instruction, claude_session_id, llm_provider, llm_model, plan_mode, stack_policy`,
     [machineId]
   );
   return res.rows[0] ?? null;
@@ -162,11 +172,18 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  // Finalize a job: set the authoritative answer, persist the claude session id
+  // Finalize a job: set the authoritative answer, persist the provider session id
   // for multi-turn resume, and mark everything done/failed.
   app.post<{
     Params: { id: string };
-    Body: { status?: "done" | "failed"; error?: string; claudeSessionId?: string; finalText?: string };
+    Body: {
+      status?: "done" | "failed";
+      error?: string;
+      claudeSessionId?: string;
+      llmSessionId?: string;
+      llmProvider?: string;
+      finalText?: string;
+    };
   }>("/api/agent/jobs/:id/complete", async (req, reply) => {
     const actor = await requireOwner(req, reply);
     if (!actor) return;
@@ -195,10 +212,12 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
         await query("UPDATE messages SET status = $2 WHERE id = $1", [job.message_id, msgStatus]);
       }
     }
-    if (req.body?.claudeSessionId) {
-      await query("UPDATE conversations SET claude_session_id = $2, updated_at = now() WHERE id = $1", [
+    const sessionId = req.body?.llmSessionId ?? req.body?.claudeSessionId;
+    if (sessionId) {
+      await query("UPDATE conversations SET claude_session_id = $2, llm_provider = $3, updated_at = now() WHERE id = $1", [
         job.conv_id,
-        req.body.claudeSessionId,
+        sessionId,
+        toProvider(req.body?.llmProvider ?? "claude"),
       ]);
     }
     // A terminal event so SSE listeners know to close.

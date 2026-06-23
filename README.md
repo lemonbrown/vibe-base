@@ -125,23 +125,27 @@ and `vibe doctor` flags a database app with missing or invalid read-models. The
 same surface is also served over HTTP under `/api/platform/*` behind the gateway
 session/role model, ready for a portal assistant or remote relay to consume.
 
-## Chat: drive your machine's Claude from the portal
+## Chat: drive your machine's local LLM from the portal
 
-The portal has a **chat** that relays instructions to *your own machine's Claude
-subscription* — so you can build a new app, adjust one, or ask about your live
-data from your phone, with the work (and the tokens) running on your machine.
+The portal has a **chat** that relays instructions to a local coding agent on
+your own machine — currently Claude Code or Codex — so you can build a new app,
+adjust one, or ask about your live data from your phone, with the work (and the
+tokens) running on your machine.
 
 ```
 phone → vibe.example.com/chat ─► control plane (job queue) ◄─ `vibe agent` daemon
-            (assistant reply streamed back over SSE)            runs `claude` on your box
+            (assistant reply streamed back over SSE)            runs claude/codex on your box
 ```
 
 - **`vibe agent`** is a daemon you run on your machine. It registers the machine,
-  long-polls the control plane for jobs, runs `claude --output-format stream-json`
-  in the right directory, and streams events back to the chat. Multi-turn chats
-  resume the same `claude` session.
+  long-polls the control plane for jobs, runs the selected provider in the right
+  directory, and streams events back to the chat. Multi-turn chats resume the
+  same provider session when available.
+- **Provider/model** defaults live in portal **Settings**. Pick `claude` or
+  `codex`, then enter a model alias or id such as `sonnet`, `opus`, `gpt-5`,
+  or any provider-specific custom string.
 - **Three job kinds**, distinguished by working directory + allowed tools:
-  - `ask` — read-only; Claude answers using the `vibe` query CLI. No edits.
+  - `ask` — read-only; the agent answers using the `vibe` query CLI. No edits.
   - `build` — a new app, created at `workspaceRoot/<app-id>`.
   - `adjust` — edits to an existing app's local directory.
 - **Workspace**: set where new apps are created and map apps that live elsewhere:
@@ -153,8 +157,30 @@ phone → vibe.example.com/chat ─► control plane (job queue) ◄─ `vibe ag
   Config lives in `~/.vibe/agent.json`. The chat page shows whether your machine
   is online; with no daemon running, messages queue until it is.
 
-> Trust model (MVP): `build`/`adjust` jobs run `claude` with `acceptEdits` and
-> `Bash` in the app's directory — i.e. autonomous code execution triggered from
+- **Rich replies**: assistant messages render GitHub-flavored markdown. The agent can
+  also emit a hidden fenced `vibe-ui` JSON block to render action buttons or
+  choices. Pressing an action sends its `prompt` back through the normal chat
+  relay with the provided `kind`, `targetApp`, and `planMode`.
+
+  ````md
+  ```vibe-ui
+  {
+    "actions": [
+      {
+        "label": "Go",
+        "prompt": "Proceed with the proposed plan.",
+        "kind": "adjust",
+        "targetApp": "grocery",
+        "planMode": false,
+        "variant": "primary"
+      }
+    ]
+  }
+  ```
+  ````
+
+> Trust model (MVP): `build`/`adjust` jobs run the selected provider with file
+> edits and shell access in the app's directory — i.e. autonomous code execution triggered from
 > the portal. Run the daemon only on a machine where that's acceptable. Tighter
 > sandboxing and an approve-on-phone step are the natural next hardening.
 

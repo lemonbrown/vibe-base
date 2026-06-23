@@ -159,6 +159,12 @@ export const api = {
 
   completeJob: (
     jobId: string,
-    body: { status: "done" | "failed"; error?: string; claudeSessionId?: string; finalText?: string }
+    body: {
+      status: "done" | "failed";
+      error?: string;
+      llmSessionId?: string;
+      llmProvider?: string;
+      finalText?: string;
+    }
   ) => call<{ ok: boolean }>("POST", `/api/agent/jobs/${jobId}/complete`, { body }),
 };

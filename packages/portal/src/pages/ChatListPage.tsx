@@ -18,7 +18,7 @@ export function ChatListPage() {
       </div>
 
       <p className="text-sm text-[var(--color-muted)]">
-        Messages run your local Claude (via{" "}
+        Messages run your selected local LLM (via{" "}
         <code className="rounded bg-[var(--color-bg)] px-1.5 py-0.5 font-mono text-xs">vibe agent</code>
         ) on your machine — ask about your data, build a new app, or adjust one.
       </p>

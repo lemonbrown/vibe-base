@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
-import { mkdir, access } from "node:fs/promises";
-import { hostname } from "node:os";
+import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { hostname, tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { AgentJob, JobEvent, JobKind } from "@vibe/shared";
 import { api } from "./client.js";
@@ -38,7 +39,7 @@ export interface ParsedLine {
 /**
  * Parse one line of `claude --output-format stream-json`. Defensive: unknown or
  * malformed lines yield null rather than throwing, so a CLI format change never
- * crashes the daemon. `seq` is a placeholder (0) — the control plane assigns the
+ * crashes the daemon. `seq` is a placeholder (0) - the control plane assigns the
  * real sequence on ingest.
  */
 export function parseStreamLine(line: string): ParsedLine | null {
@@ -87,6 +88,14 @@ interface Plan {
   preamble: string;
 }
 
+interface RunnerResult {
+  sessionId?: string;
+  finalText: string;
+  failed: boolean;
+}
+
+type Enqueue = (events: JobEvent[]) => void;
+
 const READONLY_TOOLS = [
   "Read",
   "Bash(vibe platform:*)",
@@ -107,7 +116,7 @@ const ASK_PREAMBLE =
 
 function buildPreamble(appId: string): string {
   return (
-    `You are building a NEW Vibe Base app with id "${appId}" in this (empty) directory. ` +
+    `You are building a NEW Vibe Base app with id "${appId}" in this empty directory. ` +
     `First run \`vibe init --name ${appId}\` to scaffold it, then read AGENTS.md and build ` +
     `the app per the request. Declare \`readModels\` in vibe.app.yaml for any data the user ` +
     `might ask about. When it builds, run \`vibe ship\` to deploy. Use the \`vibe\` CLI for all ` +
@@ -119,6 +128,59 @@ const ADJUST_PREAMBLE =
   "You are updating an existing Vibe Base app. Follow AGENTS.md in this directory. " +
   "Use the `vibe` CLI for infrastructure and run `vibe ship` to deploy when ready. " +
   "Keep readModels in vibe.app.yaml current and .vibe-memory/ up to date.";
+
+function portalUiPreamble(job: AgentJob): string {
+  const target = job.targetApp ? `"${job.targetApp}"` : "null";
+  return [
+    "The portal chat renders markdown, including headings, lists, tables, links, and fenced code.",
+    "When the next step should be a button or a user choice, include a hidden portal trigger block in your markdown response.",
+    "The block must be valid JSON in a fenced code block tagged `vibe-ui`. The portal hides the block and renders its actions.",
+    "When the user presses an action, the portal sends that action's `prompt` as the next user message using the provided `kind`, `targetApp`, and `planMode` fields.",
+    `Current portal job context: kind=${job.kind}, targetApp=${target}, planMode=${job.planMode}.`,
+    "For a finished plan that is ready to run, add a primary Go action with the same kind and targetApp, and set planMode to false.",
+    "For alternatives, add a `choices` array whose `options` each have a label and prompt.",
+    "Example:",
+    "```vibe-ui",
+    JSON.stringify(
+      {
+        actions: [
+          {
+            label: "Go",
+            prompt: "Proceed with the proposed plan.",
+            kind: job.kind,
+            targetApp: job.targetApp,
+            planMode: false,
+            variant: "primary",
+          },
+        ],
+        choices: [
+          {
+            label: "Pick an approach",
+            options: [
+              {
+                label: "Simple",
+                prompt: "Use the simple approach.",
+                kind: job.kind,
+                targetApp: job.targetApp,
+                planMode: false,
+              },
+              {
+                label: "More polished",
+                prompt: "Use the more polished approach.",
+                kind: job.kind,
+                targetApp: job.targetApp,
+                planMode: false,
+              },
+            ],
+          },
+        ],
+      },
+      null,
+      2
+    ),
+    "```",
+  ].join("\n");
+}
 
 /** Decide where to run and with what tools, creating dirs for new apps. */
 async function planJob(job: AgentJob, cfg: AgentConfig): Promise<Plan> {
@@ -134,11 +196,9 @@ async function planJob(job: AgentJob, cfg: AgentConfig): Promise<Plan> {
   }
 
   if (kind === "build") {
-    // A name is optional from the portal; derive a safe id if it's missing.
     const appId = job.targetApp ? slugify(job.targetApp) : `app-${Date.now().toString(36)}`;
     const { path } = resolveAppPath(cfg, appId);
     await mkdir(path, { recursive: true });
-    // Remember where we put it so later adjust/ask jobs find the same dir.
     if (!cfg.apps[appId]) {
       cfg.apps[appId] = path;
       await saveAgentConfig(cfg);
@@ -151,14 +211,13 @@ async function planJob(job: AgentJob, cfg: AgentConfig): Promise<Plan> {
     };
   }
 
-  // adjust — we must know which existing app, and it must already be on disk.
   if (!job.targetApp) {
-    throw new Error("adjust job needs a target app — pick one in the chat");
+    throw new Error("adjust job needs a target app - pick one in the chat");
   }
   const { path } = resolveAppPath(cfg, job.targetApp);
   if (!(await exists(path))) {
     throw new Error(
-      `app "${job.targetApp}" has no local directory at ${path} — link it with \`vibe agent link ${job.targetApp} <path>\``
+      `app "${job.targetApp}" has no local directory at ${path} - link it with \`vibe agent link ${job.targetApp} <path>\``
     );
   }
   return {
@@ -169,24 +228,25 @@ async function planJob(job: AgentJob, cfg: AgentConfig): Promise<Plan> {
   };
 }
 
-/**
- * Run one job: spawn `claude` in the resolved directory, stream its events back
- * to the control plane, and finalize with the session id + final answer.
- */
-async function runJob(job: AgentJob, cfg: AgentConfig): Promise<void> {
-  let plan: Plan;
-  try {
-    plan = await planJob(job, cfg);
-  } catch (err) {
-    await api.completeJob(job.id, { status: "failed", error: (err as Error).message });
-    log(`  ✗ ${(err as Error).message}`);
-    return;
-  }
+function jobPrompt(job: AgentJob, plan: Plan): string {
+  const planMode = job.planMode
+    ? "This job is in plan mode. Research and propose a concrete plan, but do not edit files, run deploys, or execute mutating commands. If the plan is ready to run, include a `vibe-ui` Go action with `planMode: false`."
+    : "";
+  const policy =
+    job.stackPolicy && job.stackPolicy.trim()
+      ? `Owner stack/preferences policy:\n${job.stackPolicy.trim()}`
+      : "";
+  return [plan.preamble, portalUiPreamble(job), planMode, policy, "---", job.instruction]
+    .filter(Boolean)
+    .join("\n\n");
+}
 
-  const prompt = `${plan.preamble}\n\n---\n\n${job.instruction}`;
-  // Plan mode (set per message in the portal) overrides the kind's default —
-  // claude researches and returns a plan without editing or executing.
-  const permissionMode = job.planMode ? "plan" : plan.permissionMode;
+async function runClaude(
+  job: AgentJob,
+  plan: Plan,
+  prompt: string,
+  enqueue: Enqueue
+): Promise<RunnerResult> {
   const args = [
     "-p",
     prompt,
@@ -194,24 +254,165 @@ async function runJob(job: AgentJob, cfg: AgentConfig): Promise<void> {
     "stream-json",
     "--verbose",
     "--permission-mode",
-    permissionMode,
+    job.planMode ? "plan" : plan.permissionMode,
     "--allowedTools",
     plan.allowedTools.join(","),
   ];
-  // The owner's stack/preferences policy, scoped server-side to build/adjust,
-  // rides in as system-prompt context rather than polluting the user message.
-  if (job.stackPolicy && job.stackPolicy.trim()) {
-    args.push("--append-system-prompt", job.stackPolicy);
-  }
-  if (job.claudeSessionId) args.push("--resume", job.claudeSessionId);
+  if (job.llmModel.trim()) args.push("--model", job.llmModel.trim());
+  if (job.stackPolicy && job.stackPolicy.trim()) args.push("--append-system-prompt", job.stackPolicy);
+  if (job.llmSessionId) args.push("--resume", job.llmSessionId);
 
-  log(`  → claude (${job.kind}${job.planMode ? ", plan" : ""}) in ${plan.cwd}`);
-
-  let sessionId: string | undefined = job.claudeSessionId ?? undefined;
+  let sessionId: string | undefined = job.llmSessionId ?? undefined;
   let finalText = "";
   let failed = false;
 
-  // Batch events so we don't POST on every single line.
+  await new Promise<void>((resolveRun) => {
+    const child = spawn("claude", args, { cwd: plan.cwd, shell: false });
+
+    const rl = createInterface({ input: child.stdout });
+    rl.on("line", (line) => {
+      const parsed = parseStreamLine(line);
+      if (!parsed) return;
+      if (parsed.sessionId) sessionId = parsed.sessionId;
+      if (parsed.events.length) enqueue(parsed.events);
+      if (parsed.final) {
+        finalText = parsed.final.text;
+        failed = parsed.final.isError;
+      }
+    });
+
+    let stderr = "";
+    child.stderr.on("data", (d) => (stderr += d.toString()));
+
+    child.on("error", (err) => {
+      const msg =
+        (err as NodeJS.ErrnoException).code === "ENOENT"
+          ? "`claude` CLI not found on PATH - install it and log in with your subscription."
+          : err.message;
+      finalText = finalText || msg;
+      failed = true;
+      stderr += msg;
+      resolveRun();
+    });
+
+    child.on("close", (code) => {
+      if (code !== 0 && !finalText) {
+        finalText = stderr.trim().split("\n").slice(-5).join("\n") || `claude exited with code ${code}`;
+        failed = true;
+      }
+      resolveRun();
+    });
+  });
+
+  return { sessionId, finalText, failed };
+}
+
+function extractCodexSessionId(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const obj = value as Record<string, unknown>;
+  for (const key of ["session_id", "sessionId", "conversation_id", "conversationId"]) {
+    if (typeof obj[key] === "string") return obj[key];
+  }
+  if (typeof obj.type === "string" && obj.type.toLowerCase().includes("session")) {
+    if (typeof obj.id === "string") return obj.id;
+  }
+  for (const key of ["session", "conversation", "thread"]) {
+    const id = extractCodexSessionId(obj[key]);
+    if (id) return id;
+  }
+  return undefined;
+}
+
+async function runCodex(
+  job: AgentJob,
+  plan: Plan,
+  prompt: string,
+  enqueue: Enqueue
+): Promise<RunnerResult> {
+  const temp = await mkdtemp(join(tmpdir(), "vibe-codex-"));
+  const outFile = join(temp, "last-message.md");
+  const args = job.llmSessionId ? ["exec", "resume"] : ["exec", "-C", plan.cwd];
+
+  args.push("--json", "--skip-git-repo-check", "-o", outFile);
+  if (job.llmModel.trim()) args.push("--model", job.llmModel.trim());
+  if (job.kind !== "ask" && !job.planMode) {
+    args.push("--dangerously-bypass-approvals-and-sandbox");
+  } else if (!job.llmSessionId) {
+    args.push("--sandbox", "read-only");
+  }
+  if (job.llmSessionId) args.push(job.llmSessionId);
+  args.push("-");
+
+  let sessionId: string | undefined = job.llmSessionId ?? undefined;
+  let failed = false;
+  let stderr = "";
+
+  try {
+    await new Promise<void>((resolveRun) => {
+      const child = spawn("codex", args, { cwd: plan.cwd, shell: false, stdio: ["pipe", "pipe", "pipe"] });
+      child.stdin.end(prompt);
+
+      const rl = createInterface({ input: child.stdout });
+      rl.on("line", (line) => {
+        try {
+          const obj = JSON.parse(line) as unknown;
+          sessionId = extractCodexSessionId(obj) ?? sessionId;
+          const type =
+            typeof obj === "object" && obj && "type" in obj
+              ? String((obj as { type?: unknown }).type)
+              : "";
+          if (type) enqueue([{ seq: 0, type: "status", data: { provider: "codex", event: type } }]);
+        } catch {
+          /* Ignore non-JSON defensive noise. */
+        }
+      });
+      child.stderr.on("data", (d) => (stderr += d.toString()));
+
+      child.on("error", (err) => {
+        stderr +=
+          (err as NodeJS.ErrnoException).code === "ENOENT"
+            ? "`codex` CLI not found on PATH - install it and log in before selecting Codex."
+            : err.message;
+        failed = true;
+        resolveRun();
+      });
+      child.on("close", (code) => {
+        if (code !== 0) failed = true;
+        resolveRun();
+      });
+    });
+
+    let finalText = "";
+    try {
+      finalText = (await readFile(outFile, "utf8")).trim();
+    } catch {
+      finalText = "";
+    }
+    if (!finalText && failed) {
+      finalText = stderr.trim().split("\n").slice(-8).join("\n") || "codex failed without a final message";
+    }
+    return { sessionId, finalText, failed };
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Run one job with the selected local LLM provider, stream events back to the
+ * control plane, and finalize with the provider session id + final answer.
+ */
+async function runJob(job: AgentJob, cfg: AgentConfig): Promise<void> {
+  let plan: Plan;
+  try {
+    plan = await planJob(job, cfg);
+  } catch (err) {
+    await api.completeJob(job.id, { status: "failed", error: (err as Error).message });
+    log(`  x ${(err as Error).message}`);
+    return;
+  }
+
+  const prompt = jobPrompt(job, plan);
+
   let queue: JobEvent[] = [];
   let flushing = Promise.resolve();
   const flush = async (): Promise<void> => {
@@ -230,59 +431,36 @@ async function runJob(job: AgentJob, cfg: AgentConfig): Promise<void> {
     if (queue.length >= 8) flushing = flushing.then(flush);
   };
 
-  await new Promise<void>((resolveRun) => {
-    const child = spawn("claude", args, { cwd: plan.cwd, shell: false });
-    const ticker = setInterval(() => {
-      flushing = flushing.then(flush);
-    }, 500);
+  const ticker = setInterval(() => {
+    flushing = flushing.then(flush);
+  }, 500);
 
-    const rl = createInterface({ input: child.stdout });
-    rl.on("line", (line) => {
-      const parsed = parseStreamLine(line);
-      if (!parsed) return;
-      if (parsed.sessionId) sessionId = parsed.sessionId;
-      if (parsed.events.length) enqueue(parsed.events);
-      if (parsed.final) {
-        finalText = parsed.final.text;
-        failed = parsed.final.isError;
-      }
-    });
+  log(
+    `  -> ${job.llmProvider} ${job.llmModel} (${job.kind}${job.planMode ? ", plan" : ""}) in ${plan.cwd}`
+  );
 
-    let stderr = "";
-    child.stderr.on("data", (d) => (stderr += d.toString()));
+  let result: RunnerResult;
+  try {
+    result =
+      job.llmProvider === "codex"
+        ? await runCodex(job, plan, prompt, enqueue)
+        : await runClaude(job, plan, prompt, enqueue);
+  } catch (err) {
+    result = { finalText: (err as Error).message, failed: true };
+  } finally {
+    clearInterval(ticker);
+  }
 
-    child.on("error", (err) => {
-      clearInterval(ticker);
-      const msg =
-        (err as NodeJS.ErrnoException).code === "ENOENT"
-          ? "`claude` CLI not found on PATH — install it and log in with your subscription."
-          : err.message;
-      finalText = finalText || msg;
-      failed = true;
-      stderr += msg;
-      resolveRun();
-    });
-
-    child.on("close", (code) => {
-      clearInterval(ticker);
-      if (code !== 0 && !finalText) {
-        finalText = stderr.trim().split("\n").slice(-5).join("\n") || `claude exited with code ${code}`;
-        failed = true;
-      }
-      resolveRun();
-    });
-  });
-
-  // Final flush, then finalize.
   await flushing;
   await flush();
   await api.completeJob(job.id, {
-    status: failed ? "failed" : "done",
-    error: failed ? finalText.slice(0, 2000) : undefined,
-    claudeSessionId: sessionId,
-    finalText,
+    status: result.failed ? "failed" : "done",
+    error: result.failed ? result.finalText.slice(0, 2000) : undefined,
+    llmProvider: job.llmProvider,
+    llmSessionId: result.sessionId,
+    finalText: result.finalText,
   });
-  log(failed ? "  ✗ job failed" : "  ✓ job done");
+  log(result.failed ? "  x job failed" : "  ok job done");
 }
 
 /* ------------------------------- daemon ------------------------------- */
@@ -304,7 +482,7 @@ export async function runDaemon(opts: { name?: string } = {}): Promise<void> {
 
   log(`vibe agent "${name}" (${machineId})`);
   log(`workspace: ${cfg.workspaceRoot}`);
-  log("Waiting for jobs… (Ctrl-C to stop)\n");
+  log("Waiting for jobs... (Ctrl-C to stop)\n");
 
   const heartbeat = setInterval(() => {
     api.agentHeartbeat(machineId).catch(() => {});
@@ -330,9 +508,10 @@ export async function runDaemon(opts: { name?: string } = {}): Promise<void> {
       await new Promise((r) => setTimeout(r, 5000));
       continue;
     }
-    if (!claimed) continue; // long-poll timed out; loop again
-    log(`Job ${claimed.id}: ${claimed.kind} — ${claimed.instruction.slice(0, 60)}`);
-    // Reload config each job so set-workspace/link changes are picked up live.
+    if (!claimed) continue;
+    log(
+      `Job ${claimed.id}: ${claimed.llmProvider}/${claimed.llmModel} ${claimed.kind} - ${claimed.instruction.slice(0, 60)}`
+    );
     await runJob(claimed, await loadAgentConfig());
   }
 }

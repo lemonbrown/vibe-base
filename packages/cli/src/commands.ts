@@ -701,7 +701,7 @@ export async function cmdDelete(opts: { yes?: boolean } = {}): Promise<void> {
 
 /* -------------------------------- agent ------------------------------- */
 
-/** Run the on-machine daemon: claim chat jobs and run `claude` for them. */
+/** Run the on-machine daemon: claim chat jobs and run the selected local LLM. */
 export async function cmdAgent(opts: { name?: string } = {}): Promise<void> {
   await runDaemon(opts);
 }

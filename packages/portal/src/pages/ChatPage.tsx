@@ -10,6 +10,10 @@ import {
 } from "../lib/queries";
 import { streamJob } from "../lib/stream";
 import { Composer } from "../components/Composer";
+import {
+  MarkdownMessage,
+  type ChatTriggerAction,
+} from "../components/MarkdownMessage";
 import { MachinePill } from "../components/MachinePill";
 import { LoadingBlock, Spinner } from "../components/States";
 
@@ -55,7 +59,7 @@ function Bubble({
       >
         <div className="mb-1 flex items-center gap-2">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-faint)]">
-            {isUser ? "You" : "Claude"}
+            {isUser ? "You" : "Agent"}
           </span>
           {status === "failed" && (
             <span className="text-[10px] font-semibold uppercase text-[var(--color-bad)]">failed</span>
@@ -68,7 +72,7 @@ function Bubble({
             ))}
           </div>
         )}
-        <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+        <div className="break-words text-sm leading-relaxed">
           {children}
           {streaming && <Caret />}
         </div>
@@ -159,6 +163,16 @@ export function ChatPage() {
     }
   };
 
+  const onTrigger = (action: ChatTriggerAction) => {
+    if (send.isPending || live?.active) return;
+    onSend(
+      action.prompt,
+      action.kind ?? "ask",
+      action.targetApp === undefined ? conv?.targetApp ?? null : action.targetApp,
+      action.planMode ?? false
+    );
+  };
+
   // Merge history with optimistic (optimistic ids are dropped once history has them).
   const history = conv?.messages ?? [];
   const historyIds = new Set(history.map((m) => m.id));
@@ -212,7 +226,14 @@ export function ChatPage() {
             return (
               <div key={m.id}>
                 <Bubble role="assistant" tools={live!.tools} streaming={live!.active} status={m.status}>
-                  {live!.text || (
+                  {live!.text ? (
+                    <MarkdownMessage
+                      content={live!.text}
+                      interactive
+                      triggersDisabled={live!.active || send.isPending}
+                      onTrigger={onTrigger}
+                    />
+                  ) : (
                     <span className="inline-flex items-center gap-2 text-[var(--color-muted)]">
                       <Spinner /> thinking…
                     </span>
@@ -226,7 +247,14 @@ export function ChatPage() {
           }
           return (
             <Bubble key={m.id} role={m.role} status={m.status}>
-              {m.content || (
+              {m.content ? (
+                <MarkdownMessage
+                  content={m.content}
+                  interactive={m.role === "assistant"}
+                  triggersDisabled={send.isPending || !!live?.active}
+                  onTrigger={onTrigger}
+                />
+              ) : (
                 <span className="text-[var(--color-faint)]">
                   {m.status === "failed" ? "(no response)" : "…"}
                 </span>

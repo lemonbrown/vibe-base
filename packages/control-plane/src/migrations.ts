@@ -216,6 +216,21 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE jobs ADD COLUMN IF NOT EXISTS stack_policy TEXT;
     `,
   },
+  {
+    // Provider/model selection for the local LLM runner. The existing
+    // claude_session_id column remains as the provider session id for backwards
+    // compatibility; llm_provider gates whether it is safe to resume.
+    id: "0006_llm_provider_model",
+    sql: `
+      ALTER TABLE owner_settings ADD COLUMN IF NOT EXISTS llm_provider TEXT NOT NULL DEFAULT 'claude';
+      ALTER TABLE owner_settings ADD COLUMN IF NOT EXISTS llm_model    TEXT NOT NULL DEFAULT 'sonnet';
+
+      ALTER TABLE conversations ADD COLUMN IF NOT EXISTS llm_provider TEXT NOT NULL DEFAULT 'claude';
+
+      ALTER TABLE jobs ADD COLUMN IF NOT EXISTS llm_provider TEXT NOT NULL DEFAULT 'claude';
+      ALTER TABLE jobs ADD COLUMN IF NOT EXISTS llm_model    TEXT NOT NULL DEFAULT 'sonnet';
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

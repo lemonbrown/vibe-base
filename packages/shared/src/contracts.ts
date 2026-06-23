@@ -184,7 +184,8 @@ export interface ReadModelResult {
 /**
  * The portal chat → control-plane → on-machine daemon relay. A user message
  * becomes a job that a `vibe agent` daemon on the owner's machine claims, runs
- * `claude` for, and streams events back to fill the assistant message.
+ * with the selected local LLM provider, and streams events back to fill the
+ * assistant message.
  */
 
 /** ask = read-only data/platform question; build = new app; adjust = edit app. */
@@ -192,6 +193,7 @@ export type JobKind = "ask" | "build" | "adjust";
 export type JobStatus = "queued" | "claimed" | "running" | "done" | "failed";
 export type MessageRole = "user" | "assistant";
 export type MessageStatus = "pending" | "streaming" | "done" | "failed";
+export type LlmProvider = "claude" | "codex";
 
 export interface ChatMessage {
   id: string;
@@ -213,7 +215,7 @@ export interface ConversationDetail extends Conversation {
   messages: ChatMessage[];
 }
 
-/** A streamed event from the daemon as `claude` works (no secrets). */
+/** A streamed event from the daemon as the selected LLM works (no secrets). */
 export interface JobEvent {
   seq: number;
   /** text = assistant output chunk; tool = a tool call; status/error/done = lifecycle. */
@@ -237,11 +239,15 @@ export interface AgentJob {
   kind: JobKind;
   targetApp: string | null;
   instruction: string;
-  /** Prior `claude` session to resume for multi-turn conversations. */
-  claudeSessionId: string | null;
-  /** When true, run `claude` in plan mode (plans, doesn't edit/execute). */
+  /** Which local coding agent CLI should run this job. */
+  llmProvider: LlmProvider;
+  /** Provider-specific model id or alias, e.g. sonnet, opus, gpt-5. */
+  llmModel: string;
+  /** Prior provider session to resume for multi-turn conversations. */
+  llmSessionId: string | null;
+  /** When true, run the provider in plan/research mode instead of editing/executing. */
   planMode: boolean;
-  /** Stack/preferences policy to append to claude's system prompt (build/adjust
+  /** Stack/preferences policy to append to the provider prompt (build/adjust
    *  only; null otherwise). Snapshotted from owner settings at send time. */
   stackPolicy: string | null;
 }
@@ -252,4 +258,8 @@ export interface OwnerSettings {
   stackPolicy: string;
   /** Initial state of the chat composer's plan-mode toggle. */
   planModeDefault: boolean;
+  /** Default local LLM runner for new chat jobs. */
+  llmProvider: LlmProvider;
+  /** Default provider model id or alias for new chat jobs. */
+  llmModel: string;
 }

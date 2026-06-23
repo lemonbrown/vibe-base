@@ -19,6 +19,7 @@ interface ConvRow {
   title: string;
   target_app: string | null;
   claude_session_id: string | null;
+  llm_provider: string;
   created_at: Date;
   updated_at: Date;
 }
@@ -93,8 +94,8 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ conversation: detail });
   });
 
-  // Post a message → record it, create a pending assistant message, and enqueue
-  // a job for the owner's daemon to run `claude` against.
+  // Post a message -> record it, create a pending assistant message, and enqueue
+  // a job for the owner's daemon to run with the selected local LLM.
   app.post<{
     Params: { id: string };
     Body: { content?: string; kind?: string; targetApp?: string; planMode?: boolean };
@@ -134,9 +135,24 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       [asstMsgId, conv.id]
     );
     await query(
-      `INSERT INTO jobs (id, conv_id, message_id, kind, target_app, instruction, claude_session_id, plan_mode, stack_policy)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [jobId, conv.id, asstMsgId, kind, targetApp, content, conv.claude_session_id ?? null, planMode, stackPolicy]
+      `INSERT INTO jobs (
+         id, conv_id, message_id, kind, target_app, instruction, claude_session_id,
+         plan_mode, stack_policy, llm_provider, llm_model
+       )
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [
+        jobId,
+        conv.id,
+        asstMsgId,
+        kind,
+        targetApp,
+        content,
+        conv.llm_provider === settings.llmProvider ? conv.claude_session_id ?? null : null,
+        planMode,
+        stackPolicy,
+        settings.llmProvider,
+        settings.llmModel,
+      ]
     );
 
     // Title a fresh conversation from its first message.

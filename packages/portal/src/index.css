@@ -104,4 +104,56 @@
   .section-title {
     @apply text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)];
   }
+
+  .chat-markdown {
+    @apply break-words text-sm leading-relaxed;
+  }
+  .chat-markdown > :first-child {
+    @apply mt-0;
+  }
+  .chat-markdown > :last-child {
+    @apply mb-0;
+  }
+  .chat-markdown p,
+  .chat-markdown ul,
+  .chat-markdown ol,
+  .chat-markdown pre,
+  .chat-markdown blockquote,
+  .chat-markdown table {
+    @apply my-2;
+  }
+  .chat-markdown ul {
+    @apply list-disc pl-5;
+  }
+  .chat-markdown ol {
+    @apply list-decimal pl-5;
+  }
+  .chat-markdown li {
+    @apply my-0.5;
+  }
+  .chat-markdown a {
+    @apply text-[var(--color-brand)] underline underline-offset-2;
+  }
+  .chat-markdown code {
+    @apply rounded bg-[var(--color-surface-2)] px-1 py-0.5 font-mono text-[0.85em];
+  }
+  .chat-markdown pre {
+    @apply overflow-x-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-3;
+  }
+  .chat-markdown pre code {
+    @apply bg-transparent p-0 text-xs;
+  }
+  .chat-markdown blockquote {
+    @apply border-l-2 border-[var(--color-border-strong)] pl-3 text-[var(--color-muted)];
+  }
+  .chat-markdown table {
+    @apply block max-w-full overflow-x-auto text-left text-xs;
+  }
+  .chat-markdown th,
+  .chat-markdown td {
+    @apply border border-[var(--color-border)] px-2 py-1 align-top;
+  }
+  .chat-markdown th {
+    @apply bg-[var(--color-surface-2)] font-semibold;
+  }
 }

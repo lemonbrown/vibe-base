@@ -140,7 +140,7 @@ program
 
 const agent = program
   .command("agent")
-  .description("Run the on-machine daemon that runs your local Claude for portal chat jobs")
+  .description("Run the on-machine daemon that runs your selected local LLM for portal chat jobs")
   .option("--name <name>", "name to register this machine under")
   .action(wrap((opts: { name?: string }) => cmdAgent(opts)));
 agent

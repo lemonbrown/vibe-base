@@ -98,13 +98,13 @@ export function Composer({
         {needsTarget && !plan && (
           <span className="text-[var(--color-faint)]">
             {" "}
-            Runs Claude with edits + shell in the app's directory on your machine.
+            Runs the selected local agent with edits + shell in the app's directory on your machine.
           </span>
         )}
         {plan && (
           <span className="text-[var(--color-warn)]">
             {" "}
-            Plan mode: Claude proposes a plan instead of editing/executing — turn
+            Plan mode: the agent proposes a plan instead of editing/executing — turn
             off to run it.
           </span>
         )}
