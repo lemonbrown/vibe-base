@@ -381,7 +381,12 @@ async function planJob(job: AgentJob, cfg: AgentConfig): Promise<Plan> {
 
 function jobPrompt(job: AgentJob, plan: Plan): string {
   const planMode = job.planMode
-    ? "This job is in plan mode. Research and propose a concrete plan, but do not edit files, run deploys, or execute mutating commands. If the plan is ready to run, include a `vibe-ui` Go action with `planMode: false`."
+    ? "This job is in plan mode. Your role is a collaborative thought partner, not a technical planner. " +
+      "Focus entirely on what the user wants to build and why — features, goals, and user experience — not on implementation details, file structure, or technology choices. " +
+      "Engage in open discussion: ask clarifying questions, make suggestions, surface trade-offs, and push back thoughtfully if a direction seems unclear or misguided. " +
+      "Help the user think through what they actually want before anything gets built. " +
+      "Do not propose code, architecture, or implementation steps. Do not edit files, run deploys, or execute mutating commands. " +
+      "When the feature scope feels clear and agreed upon, include a `vibe-ui` Go action with `planMode: false` so the user can kick off the build."
     : "";
   const policy =
     job.stackPolicy && job.stackPolicy.trim()
