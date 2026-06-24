@@ -140,20 +140,37 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   /* --------------------------- claim invite --------------------------- */
   app.get<{ Querystring: { token?: string } }>("/claim", async (req, reply) => {
-    const inv = await validInvite(req.query.token);
+    const inv = await resolveInvite(req.query.token);
     if (!inv) return reply.code(400).type("text/html").send(loginPage("", "Invite is invalid or expired."));
     return reply.type("text/html").send(claimPage(inv.token, inv.email));
   });
 
   app.post<{ Body: { token?: string; password?: string } }>("/claim", async (req, reply) => {
     const { token: tok, password = "" } = req.body ?? {};
-    const inv = await validInvite(tok);
+    const inv = await resolveInvite(tok);
     if (!inv) return reply.code(400).type("text/html").send(loginPage("", "Invite is invalid or expired."));
     if (password.length < 8) {
       return reply.code(400).type("text/html").send(claimPage(inv.token, inv.email, "Password must be at least 8 characters."));
     }
 
     const hash = await hashPassword(password);
+    const cfg = loadConfig();
+
+    if (inv.kind === "portal") {
+      await query(
+        `INSERT INTO users (email, role, password_hash, status)
+         VALUES ($1, 'member', $2, 'active')
+         ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, status = 'active'`,
+        [inv.email, hash]
+      );
+      await query("UPDATE portal_invites SET claimed_at = now() WHERE token = $1", [inv.token]);
+      const sid = await createSession(inv.email);
+      setSessionCookie(reply, sid);
+      await audit({ actorEmail: inv.email, action: "portal.invite.claim" });
+      return reply.redirect(`https://${cfg.controlPlaneDomain}/`);
+    }
+
+    // App invite
     await query(
       `INSERT INTO users (email, role, password_hash, status)
        VALUES ($1, $2, $3, 'active')
@@ -165,29 +182,32 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       [inv.app_id, inv.email]
     );
     await query("UPDATE invites SET claimed_at = now() WHERE token = $1", [inv.token]);
-
     const sid = await createSession(inv.email);
     setSessionCookie(reply, sid);
     await audit({ actorEmail: inv.email, action: "invite.claim", appId: inv.app_id });
-
-    const cfg = loadConfig();
     const sub = await one<{ subdomain: string }>("SELECT subdomain FROM apps WHERE id = $1", [inv.app_id]);
     return reply.redirect(`https://${sub?.subdomain}.${cfg.appsDomain}/`);
   });
 }
 
-interface InviteRow {
-  token: string;
-  app_id: string;
-  email: string;
-  role: string;
-}
+type ResolvedInvite =
+  | { kind: "portal"; token: string; email: string }
+  | { kind: "app"; token: string; app_id: string; email: string; role: string };
 
-async function validInvite(tok: string | undefined): Promise<InviteRow | null> {
+async function resolveInvite(tok: string | undefined): Promise<ResolvedInvite | null> {
   if (!tok) return null;
-  return one<InviteRow>(
-    `SELECT token, app_id, email, role FROM invites
-      WHERE token = $1 AND claimed_at IS NULL AND expires_at > now()`,
+
+  const portal = await one<{ token: string; email: string }>(
+    "SELECT token, email FROM portal_invites WHERE token = $1 AND claimed_at IS NULL AND expires_at > now()",
     [tok]
   );
+  if (portal) return { kind: "portal", ...portal };
+
+  const app = await one<{ token: string; app_id: string; email: string; role: string }>(
+    "SELECT token, app_id, email, role FROM invites WHERE token = $1 AND claimed_at IS NULL AND expires_at > now()",
+    [tok]
+  );
+  if (app) return { kind: "app", ...app };
+
+  return null;
 }

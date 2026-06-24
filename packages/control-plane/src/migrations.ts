@@ -247,6 +247,20 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE jobs ADD COLUMN IF NOT EXISTS owner_email TEXT;
     `,
   },
+  {
+    // Portal-level invites: invite a user to the portal itself (not a specific app).
+    id: "0009_portal_invites",
+    sql: `
+      CREATE TABLE IF NOT EXISTS portal_invites (
+        token      TEXT PRIMARY KEY,
+        email      TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        expires_at TIMESTAMPTZ NOT NULL,
+        claimed_at TIMESTAMPTZ
+      );
+      CREATE INDEX IF NOT EXISTS portal_invites_email_idx ON portal_invites(email);
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

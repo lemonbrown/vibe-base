@@ -4,7 +4,7 @@ import { query } from "../db.js";
 import { audit } from "../lib/audit.js";
 import { appSummary, getApp, listApps } from "../repo.js";
 import { destroyApp } from "../services/teardown.js";
-import { requireOwner } from "./guards.js";
+import { requireOwner, requireUser } from "./guards.js";
 
 export async function appRoutes(app: FastifyInstance): Promise<void> {
   // Register a new app or update its manifest (idempotent upsert).
@@ -79,7 +79,7 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.get("/api/apps", async (req, reply) => {
-    const actor = await requireOwner(req, reply);
+    const actor = await requireUser(req, reply);
     if (!actor) return;
     const rows = await listApps();
     const apps = await Promise.all(rows.map(appSummary));

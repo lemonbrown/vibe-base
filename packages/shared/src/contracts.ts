@@ -98,6 +98,16 @@ export const MemberSchema = z.object({
 });
 export type Member = z.infer<typeof MemberSchema>;
 
+/* ----------------------- API: portal members -------------------------- */
+
+export const PortalMemberSchema = z.object({
+  email: z.string(),
+  status: z.enum(["invited", "active", "revoked"]),
+  joinedAt: z.string().optional(),
+  invitedAt: z.string().optional(),
+});
+export type PortalMember = z.infer<typeof PortalMemberSchema>;
+
 /* ----------------------- Secret presence map -------------------------- */
 /** Per spec §23.1: the LLM sees which secrets exist, never their values. */
 export const SecretPresenceSchema = z.record(

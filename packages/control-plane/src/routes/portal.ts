@@ -48,7 +48,7 @@ export async function portalRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const actor = await getActor(req);
-    if (!isOwner(actor)) {
+    if (!actor) {
       const cfg = loadConfig();
       const next = `https://${cfg.controlPlaneDomain}${req.url}`;
       return reply.redirect(

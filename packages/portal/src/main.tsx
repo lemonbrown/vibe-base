@@ -9,6 +9,7 @@ import { AppDetailPage } from "./pages/AppDetailPage";
 import { ChatListPage } from "./pages/ChatListPage";
 import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { MembersPage } from "./pages/MembersPage";
 import { ErrorState } from "./components/States";
 
 const queryClient = new QueryClient({
@@ -30,6 +31,7 @@ const router = createBrowserRouter([
       { path: "/apps/:id", element: <AppDetailPage /> },
       { path: "/chat", element: <ChatListPage /> },
       { path: "/chat/:id", element: <ChatPage /> },
+      { path: "/members", element: <MembersPage /> },
       { path: "/settings", element: <SettingsPage /> },
       { path: "*", element: <Navigate to="/" replace /> },
     ],

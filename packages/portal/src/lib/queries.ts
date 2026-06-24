@@ -114,6 +114,29 @@ export function useRollback(id: string) {
   });
 }
 
+export function usePortalMembers() {
+  return useQuery({
+    queryKey: ["portal-members"],
+    queryFn: api.listPortalMembers,
+  });
+}
+
+export function usePortalInvite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (email: string) => api.portalInvite(email),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["portal-members"] }),
+  });
+}
+
+export function useRevokePortalMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (email: string) => api.revokePortalMember(email),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["portal-members"] }),
+  });
+}
+
 export function useDeleteApp(id: string) {
   const qc = useQueryClient();
   return useMutation({

@@ -3,6 +3,7 @@ import type {
   AppStatus,
   Deployment,
   Member,
+  PortalMember,
   Conversation,
   ConversationDetail,
   PlatformRole,
@@ -145,6 +146,22 @@ export const api = {
   stopConversation: (convId: string) =>
     http<{ ok: boolean; jobId: string | null }>(`/api/chat/${convId}/stop`, {
       method: "POST",
+    }),
+
+  /* --------------------------- portal members --------------------------- */
+
+  listPortalMembers: () =>
+    http<{ members: PortalMember[]; emailConfigured: boolean }>("/api/portal/members"),
+
+  portalInvite: (email: string) =>
+    http<{ email: string; sent: boolean; claimUrl?: string }>("/api/portal/invite", {
+      method: "POST",
+      body: body({ email }),
+    }),
+
+  revokePortalMember: (email: string) =>
+    http<{ revoked: string }>(`/api/portal/members/${encodeURIComponent(email)}`, {
+      method: "DELETE",
     }),
 
   /* -------------------------------- agent -------------------------------- */

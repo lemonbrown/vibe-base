@@ -15,6 +15,7 @@ import { chatRoutes } from "./routes/chat.js";
 import { deployRoutes } from "./routes/deploy.js";
 import { githubRoutes } from "./routes/github.js";
 import { memberRoutes } from "./routes/members.js";
+import { portalMemberRoutes } from "./routes/portalMembers.js";
 import { portalRoutes } from "./routes/portal.js";
 import { queryRoutes } from "./routes/query.js";
 import { settingsRoutes } from "./routes/settings.js";
@@ -55,6 +56,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(deployRoutes);
   await app.register(githubRoutes);
   await app.register(memberRoutes);
+  await app.register(portalMemberRoutes);
   await app.register(statusRoutes);
   await app.register(queryRoutes);
   await app.register(agentRoutes);

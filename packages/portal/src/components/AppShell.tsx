@@ -39,10 +39,21 @@ function GearIcon({ className = "" }: { className?: string }) {
     </svg>
   );
 }
+function PeopleIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
+      <circle cx="9" cy="7" r="3" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <circle cx="17" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.5" opacity="0.6" />
+      <path d="M21 20c0-2.8-1.8-5-4-5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.6" />
+    </svg>
+  );
+}
 
 const NAV = [
   { to: "/", label: "Apps", icon: GridIcon, match: (p: string) => p === "/" || p.startsWith("/apps") },
   { to: "/chat", label: "Chat", icon: ChatIcon, match: (p: string) => p.startsWith("/chat") },
+  { to: "/members", label: "Members", icon: PeopleIcon, match: (p: string) => p.startsWith("/members") },
   { to: "/settings", label: "Settings", icon: GearIcon, match: (p: string) => p.startsWith("/settings") },
 ];
 
