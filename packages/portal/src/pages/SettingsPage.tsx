@@ -102,21 +102,23 @@ export function SettingsPage() {
             <span className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
               Model
             </span>
-            <input
+            <select
               className="input"
-              list="llm-model-presets"
-              value={llmModel}
+              value={MODEL_PRESETS[llmProvider].includes(llmModel) ? llmModel : "__custom__"}
               onChange={(e) => {
-                setLlmModel(e.target.value);
-                if (!isReasoningModel(e.target.value)) setLlmReasoningEffort(null);
+                if (e.target.value !== "__custom__") {
+                  setLlmModel(e.target.value);
+                  if (!isReasoningModel(e.target.value)) setLlmReasoningEffort(null);
+                }
               }}
-              placeholder={llmProvider === "claude" ? "claude-sonnet-4-6" : "o4-mini"}
-            />
-            <datalist id="llm-model-presets">
+            >
               {MODEL_PRESETS[llmProvider].map((model) => (
-                <option key={model} value={model} />
+                <option key={model} value={model}>{model}</option>
               ))}
-            </datalist>
+              {!MODEL_PRESETS[llmProvider].includes(llmModel) && llmModel && (
+                <option value="__custom__">{llmModel}</option>
+              )}
+            </select>
           </label>
         </div>
 
