@@ -17,12 +17,6 @@ const MODEL_PRESETS: Record<LlmProvider, string[]> = {
   ],
 };
 
-const REASONING_MODELS = new Set(["o4-mini", "o3", "o3-mini", "o1", "o1-mini", "o3-pro"]);
-
-function isReasoningModel(model: string): boolean {
-  // o-series models start with "o" followed by a digit
-  return REASONING_MODELS.has(model) || /^o\d/.test(model);
-}
 
 export function SettingsPage() {
   const { data: settings, isLoading, error } = useSettings();
@@ -60,7 +54,6 @@ export function SettingsPage() {
       { onSuccess: () => setSavedAt(Date.now()) }
     );
 
-  const showReasoningEffort = llmProvider === "codex" && isReasoningModel(llmModel);
 
   if (isLoading) return <LoadingBlock label="Loading settings…" />;
   if (error) return <InlineError message={(error as Error).message} />;
@@ -108,7 +101,6 @@ export function SettingsPage() {
               onChange={(e) => {
                 if (e.target.value !== "__custom__") {
                   setLlmModel(e.target.value);
-                  if (!isReasoningModel(e.target.value)) setLlmReasoningEffort(null);
                 }
               }}
             >
@@ -122,28 +114,26 @@ export function SettingsPage() {
           </label>
         </div>
 
-        {showReasoningEffort && (
-          <div className="mt-3">
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
-                Reasoning effort
-              </span>
-              <select
-                className="input"
-                value={llmReasoningEffort ?? ""}
-                onChange={(e) => setLlmReasoningEffort(e.target.value || null)}
-              >
-                <option value="">Default</option>
-                <option value="low">Low — fast, lighter reasoning</option>
-                <option value="medium">Medium</option>
-                <option value="high">High — slower, deeper reasoning</option>
-              </select>
-            </label>
-            <p className="mt-1 text-xs text-[var(--color-faint)]">
-              Controls how much the model "thinks" before responding. Only applies to o-series models.
-            </p>
-          </div>
-        )}
+        <div className="mt-3">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-[var(--color-muted)]">
+              Reasoning effort
+            </span>
+            <select
+              className="input"
+              value={llmReasoningEffort ?? ""}
+              onChange={(e) => setLlmReasoningEffort(e.target.value || null)}
+            >
+              <option value="">Default</option>
+              <option value="low">Low — fast, lighter reasoning</option>
+              <option value="medium">Medium</option>
+              <option value="high">High — slower, deeper reasoning</option>
+            </select>
+          </label>
+          <p className="mt-1 text-xs text-[var(--color-faint)]">
+            Controls how much the model thinks before responding.
+          </p>
+        </div>
       </Card>
 
       <Card title="Stack policy">
