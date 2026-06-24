@@ -19,12 +19,56 @@ function AppIcon({ svg }: { svg: string }) {
 
 type Mode = "open" | "details";
 
+const healthColor: Record<string, string> = {
+  healthy: "var(--color-ok)",
+  unhealthy: "var(--color-bad)",
+  unknown: "var(--color-warn)",
+};
+
 function AppCard({ app, mode }: { app: AppSummary; mode: Mode }) {
   const className =
     "card group flex flex-col gap-3 p-4 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-2)]";
 
-  const body = (
-    <>
+  if (mode === "open") {
+    const body = (
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--color-surface-2)]">
+            {app.icon ? (
+              <AppIcon svg={app.icon} />
+            ) : (
+              <span className="text-lg font-semibold text-[var(--color-muted)]">
+                {app.name.charAt(0).toUpperCase()}
+              </span>
+            )}
+          </div>
+          <h3 className="truncate font-medium group-hover:text-white">{app.name}</h3>
+        </div>
+        <span
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ background: healthColor[app.health] ?? healthColor.unknown }}
+          aria-hidden
+        />
+      </div>
+    );
+
+    if (app.url) {
+      return (
+        <a href={app.url} target="_blank" rel="noopener noreferrer" className={className}>
+          {body}
+        </a>
+      );
+    }
+
+    return (
+      <Link to={`/apps/${app.id}`} className={className}>
+        {body}
+      </Link>
+    );
+  }
+
+  return (
+    <Link to={`/apps/${app.id}`} className={className}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--color-surface-2)]">
@@ -52,20 +96,6 @@ function AppCard({ app, mode }: { app: AppSummary; mode: Mode }) {
       {app.url && (
         <span className="truncate text-xs text-[var(--color-brand)]">{app.url}</span>
       )}
-    </>
-  );
-
-  if (mode === "open" && app.url) {
-    return (
-      <a href={app.url} target="_blank" rel="noopener noreferrer" className={className}>
-        {body}
-      </a>
-    );
-  }
-
-  return (
-    <Link to={`/apps/${app.id}`} className={className}>
-      {body}
     </Link>
   );
 }
