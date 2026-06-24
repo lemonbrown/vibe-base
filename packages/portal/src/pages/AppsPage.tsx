@@ -26,49 +26,54 @@ const healthColor: Record<string, string> = {
 };
 
 function AppCard({ app, mode }: { app: AppSummary; mode: Mode }) {
-  const className =
-    "card group flex flex-col gap-3 p-4 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-2)]";
-
   if (mode === "open") {
     const body = (
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--color-surface-2)]">
+      <div className="flex flex-col items-center gap-2 p-3">
+        <div className="relative">
+          <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-[var(--color-surface-2)]">
             {app.icon ? (
               <AppIcon svg={app.icon} />
             ) : (
-              <span className="text-lg font-semibold text-[var(--color-muted)]">
+              <span className="text-2xl font-semibold text-[var(--color-muted)]">
                 {app.name.charAt(0).toUpperCase()}
               </span>
             )}
           </div>
-          <h3 className="truncate font-medium group-hover:text-white">{app.name}</h3>
+          <span
+            className="absolute -right-1 -top-1 h-3 w-3 rounded-full border-2 border-[var(--color-surface)]"
+            style={{ background: healthColor[app.health] ?? healthColor.unknown }}
+            aria-hidden
+          />
         </div>
-        <span
-          className="h-2 w-2 shrink-0 rounded-full"
-          style={{ background: healthColor[app.health] ?? healthColor.unknown }}
-          aria-hidden
-        />
+        <span className="w-full truncate text-center text-xs font-medium group-hover:text-white">
+          {app.name}
+        </span>
       </div>
     );
 
+    const openClassName =
+      "card group aspect-square flex items-center justify-center transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-2)]";
+
     if (app.url) {
       return (
-        <a href={app.url} target="_blank" rel="noopener noreferrer" className={className}>
+        <a href={app.url} target="_blank" rel="noopener noreferrer" className={openClassName}>
           {body}
         </a>
       );
     }
 
     return (
-      <Link to={`/apps/${app.id}`} className={className}>
+      <Link to={`/apps/${app.id}`} className={openClassName}>
         {body}
       </Link>
     );
   }
 
+  const detailClassName =
+    "card group flex flex-col gap-3 p-4 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-2)]";
+
   return (
-    <Link to={`/apps/${app.id}`} className={className}>
+    <Link to={`/apps/${app.id}`} className={detailClassName}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--color-surface-2)]">
@@ -157,7 +162,13 @@ export function AppsPage() {
       )}
 
       {apps && apps.length > 0 && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div
+          className={
+            mode === "open"
+              ? "grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6"
+              : "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+          }
+        >
           {apps.map((a) => (
             <AppCard key={a.id} app={a} mode={mode} />
           ))}
