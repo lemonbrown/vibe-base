@@ -179,6 +179,11 @@ async function runDeploy(
       if (emailEnv) Object.assign(env, emailEnv);
       else await appendLog(deploymentId, "[vibe] email capability enabled but no platform SMTP configured — skipping");
     }
+    if (m.capabilities.llm) {
+      const cfg = loadConfig();
+      env.VIBE_CONTROL_URL = `https://${cfg.controlPlaneDomain}`;
+      env.VIBE_OWNER_TOKEN = cfg.ownerToken;
+    }
 
     // Migrations (run as a one-off before the new container takes traffic).
     if (m.capabilities.database && m.database?.migrations) {

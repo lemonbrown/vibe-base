@@ -36,6 +36,7 @@ export const CapabilitiesSchema = z.object({
   email: z.boolean().default(false),
   scheduledJobs: z.boolean().default(false),
   actions: z.boolean().default(false),
+  llm: z.boolean().default(false),
 });
 
 export const DatabaseSchema = z.object({

@@ -85,6 +85,41 @@ Live data / read-models (REQUIRED when this app has a database):
 - A \`.gitignore\` is scaffolded for you. **Never commit \`.env\` or secrets**, and
   keep \`node_modules/\` out of git; if it's missing, create one before committing.
 
+LLM generation (when \`capabilities.llm: true\` in vibe.app.yaml):
+- The platform injects two env vars so your **server** can delegate text generation
+  to the owner's local LLM daemon — no API keys needed in the app itself:
+  - \`VIBE_CONTROL_URL\` — base URL of the control plane.
+  - \`VIBE_OWNER_TOKEN\` — bearer token for the owner's account.
+- Call \`POST \${VIBE_CONTROL_URL}/api/apps/\${VIBE_APP_ID}/llm\` from your server code.
+  Never expose \`VIBE_OWNER_TOKEN\` to the browser.
+- Body: \`{ "prompt": "...", "systemPrompt": "..." }\` — \`systemPrompt\` is optional;
+  use it to set persistent context (e.g. "You are a Bible curriculum assistant.")
+  without mixing it into each user prompt.
+- Response: **Server-Sent Events** — each \`data:\` line is a JSON \`JobEvent\`:
+  \`{ seq, type, data }\`. Collect \`type === "text"\` payloads; stop on \`type === "done"\`.
+- Example (Node/fetch):
+  \`\`\`js
+  const res = await fetch(\`\${process.env.VIBE_CONTROL_URL}/api/apps/\${process.env.VIBE_APP_ID}/llm\`, {
+    method: 'POST',
+    headers: {
+      'Authorization': \`Bearer \${process.env.VIBE_OWNER_TOKEN}\`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ systemPrompt: 'You are a Bible curriculum assistant.', prompt }),
+  });
+  let output = '';
+  for await (const chunk of res.body) {
+    for (const line of Buffer.from(chunk).toString().split('\\n')) {
+      if (!line.startsWith('data:')) continue;
+      const ev = JSON.parse(line.slice(5).trim());
+      if (ev.type === 'text') output += ev.data.text ?? '';
+      if (ev.type === 'done') break;
+    }
+  }
+  \`\`\`
+- The daemon uses the owner's configured model and provider. Your app pays no
+  inference cost and needs no model selection logic.
+
 Deploying (GitHub is the default path):
 - **Credentials:** if any \`vibe\` command reports you are not logged in, stop and
   ask the user for their control-plane URL and owner token, then run
@@ -166,6 +201,7 @@ ${m.database?.migrations ? `- Migrations: ${m.database.migrations}` : ""}
 ${m.capabilities.database ? "- `DATABASE_URL` — Postgres connection string." : ""}
 ${m.capabilities.storage ? "- `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`, `S3_FORCE_PATH_STYLE`." : ""}
 ${m.capabilities.email ? "- `EMAIL_PROVIDER` (`resend` | `gmail-api` | `smtp`) + `EMAIL_FROM`. `resend`: `RESEND_API_KEY` (POST to the Resend API / `resend` package). `gmail-api`: `GMAIL_CLIENT_ID/SECRET`, `GMAIL_REFRESH_TOKEN` (the `googleapis` Gmail API). `smtp`: `SMTP_HOST/PORT/USER/PASS/SECURE` (nodemailer)." : ""}
+${m.capabilities.llm ? "- `VIBE_CONTROL_URL` — control-plane base URL for LLM proxy calls.\n- `VIBE_OWNER_TOKEN` — bearer token; authenticate server-side LLM requests. Never expose to the browser." : ""}
 - \`X-Vibe-User-Email\` / \`X-Vibe-User-Role\` request headers (gateway auth).
 `;
 }
@@ -407,6 +443,8 @@ function envExample(m: Manifest): string {
     lines.push(
       "# EMAIL_PROVIDER, EMAIL_FROM (+ GMAIL_* for gmail-api, or SMTP_* for smtp)"
     );
+  if (m.capabilities.llm)
+    lines.push("# VIBE_CONTROL_URL", "# VIBE_OWNER_TOKEN");
   lines.push("", "# Your app's own variables go below (set with `vibe env set`):");
   return lines.join("\n") + "\n";
 }

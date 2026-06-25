@@ -242,7 +242,11 @@ function buildPreamble(appId: string): string {
     `Once the app builds, run \`vibe ship\` to deploy, then immediately run \`vibe ci\` ` +
     `to monitor the GitHub Actions build. If CI fails, read the log output it prints, fix ` +
     `the issue, and run \`vibe ship\` again. Use the \`vibe\` CLI for all infrastructure ` +
-    `and keep .vibe-memory/ up to date.`
+    `and keep .vibe-memory/ up to date.\n\n` +
+    `If the app needs to generate text or content with an LLM, set \`capabilities.llm: true\` ` +
+    `in vibe.app.yaml and call \`POST $VIBE_CONTROL_URL/api/apps/$VIBE_APP_ID/llm\` from the ` +
+    `server (Authorization: Bearer $VIBE_OWNER_TOKEN). Both env vars are injected automatically ` +
+    `at deploy time. See the LLM generation section of AGENTS.md for the full SSE streaming example.`
   );
 }
 
@@ -251,7 +255,11 @@ const ADJUST_PREAMBLE =
   "Use the `vibe` CLI for infrastructure and run `vibe ship` to deploy when ready, " +
   "then run `vibe ci` to monitor the GitHub Actions build. If CI fails, read the log " +
   "output, fix the issue, and run `vibe ship` again. " +
-  "Keep readModels in vibe.app.yaml current and .vibe-memory/ up to date.";
+  "Keep readModels in vibe.app.yaml current and .vibe-memory/ up to date.\n\n" +
+  "If the app needs to generate text or content with an LLM, set `capabilities.llm: true` " +
+  "in vibe.app.yaml and call `POST $VIBE_CONTROL_URL/api/apps/$VIBE_APP_ID/llm` from the " +
+  "server (Authorization: Bearer $VIBE_OWNER_TOKEN). Both env vars are injected automatically " +
+  "at deploy time. See the LLM generation section of AGENTS.md for the full SSE streaming example.";
 
 const CHAT_PREAMBLE =
   "You are a Vibe Base assistant with full access to the workspace. " +
@@ -326,6 +334,16 @@ function portalUiPreamble(job: AgentJob): string {
 async function planJob(job: AgentJob, cfg: AgentConfig): Promise<Plan> {
   const kind: JobKind = job.kind;
 
+  if (kind === "generate") {
+    await mkdir(cfg.workspaceRoot, { recursive: true });
+    return {
+      cwd: cfg.workspaceRoot,
+      allowedTools: [],
+      permissionMode: "default",
+      preamble: "",
+    };
+  }
+
   if (kind === "chat") {
     await mkdir(cfg.workspaceRoot, { recursive: true });
     return {
@@ -380,6 +398,9 @@ async function planJob(job: AgentJob, cfg: AgentConfig): Promise<Plan> {
 }
 
 function jobPrompt(job: AgentJob, plan: Plan): string {
+  // Generate jobs send the raw instruction as the prompt — no preamble or portal UI wrappers.
+  if (job.kind === "generate") return job.instruction;
+
   const planMode = job.planMode
     ? "This job is in plan mode. Your role is a collaborative thought partner, not a technical planner. " +
       "Focus entirely on what the user wants to build and why — features, goals, and user experience — not on implementation details, file structure, or technology choices. " +
@@ -411,9 +432,10 @@ async function runClaude(
     "--verbose",
     "--permission-mode",
     job.planMode ? "plan" : plan.permissionMode,
-    "--allowedTools",
-    plan.allowedTools.join(","),
   ];
+  if (plan.allowedTools.length > 0) {
+    args.push("--allowedTools", plan.allowedTools.join(","));
+  }
   if (job.llmModel.trim()) args.push("--model", job.llmModel.trim());
   if (job.stackPolicy && job.stackPolicy.trim()) args.push("--append-system-prompt", job.stackPolicy);
   if (job.llmSessionId) args.push("--resume", job.llmSessionId);
@@ -505,7 +527,7 @@ async function runCodex(
   args.push("--json", "--skip-git-repo-check", "-o", outFile);
   if (job.llmModel.trim()) args.push("--model", job.llmModel.trim());
   if (job.llmReasoningEffort) args.push("--reasoning-effort", job.llmReasoningEffort);
-  if (job.kind !== "ask" && !job.planMode) {
+  if (job.kind !== "ask" && job.kind !== "generate" && !job.planMode) {
     args.push("--dangerously-bypass-approvals-and-sandbox");
   } else if (!job.llmSessionId) {
     args.push("--sandbox", "read-only");

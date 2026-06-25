@@ -9,6 +9,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { loadConfig } from "./config.js";
 import { shortId } from "./lib/ids.js";
 import { agentRoutes } from "./routes/agent.js";
+import { appLlmRoutes } from "./routes/appLlm.js";
 import { appRoutes } from "./routes/apps.js";
 import { authRoutes } from "./routes/auth.js";
 import { chatRoutes } from "./routes/chat.js";
@@ -60,6 +61,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(statusRoutes);
   await app.register(queryRoutes);
   await app.register(agentRoutes);
+  await app.register(appLlmRoutes);
   await app.register(chatRoutes);
   await app.register(settingsRoutes);
   await app.register(portalRoutes);
