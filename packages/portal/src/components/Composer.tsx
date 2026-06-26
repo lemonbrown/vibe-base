@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import type { JobKind } from "@vibe/shared";
+import type { ChatAttachment, JobKind } from "@vibe/shared";
 import { useSettings } from "../lib/queries";
+import { attachmentSummary, processFiles, type AttachmentDraft } from "../lib/attachments";
 import { Toggle } from "./ui";
 
 export function Composer({
@@ -18,28 +19,50 @@ export function Composer({
     content: string,
     kind: JobKind,
     targetApp: string | null,
-    planMode: boolean
+    planMode: boolean,
+    attachments: ChatAttachment[]
   ) => void;
   onStop?: () => void;
 }) {
   const { data: settings } = useSettings();
   const [text, setText] = useState("");
   const [plan, setPlan] = useState(false);
+  const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
+  const [processing, setProcessing] = useState(false);
   const planTouched = useRef(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   // Seed the plan toggle from the saved default until the user flips it.
   useEffect(() => {
     if (settings && !planTouched.current) setPlan(settings.planModeDefault);
   }, [settings]);
 
-  const canSend = !!text.trim() && !sending && !streaming;
+  const readyAttachments = attachments.filter((a) => a.status === "ready");
+  const canSend =
+    (!!text.trim() || readyAttachments.length > 0) &&
+    !sending &&
+    !streaming &&
+    !processing &&
+    readyAttachments.length === attachments.length;
   const policyActive = !!settings?.stackPolicy.trim();
+
+  const addFiles = async (files: File[]) => {
+    if (!files.length) return;
+    setProcessing(true);
+    try {
+      const processed = await processFiles(files, attachments.length);
+      setAttachments((cur) => [...cur, ...processed]);
+    } finally {
+      setProcessing(false);
+    }
+  };
 
   const submit = () => {
     if (!canSend) return;
-    onSend(text.trim(), "chat", null, plan);
+    onSend(text.trim(), "chat", null, plan, readyAttachments);
     setText("");
+    setAttachments([]);
     if (taRef.current) taRef.current.style.height = "auto";
   };
 
@@ -82,8 +105,65 @@ export function Composer({
         </p>
       )}
 
+      {attachments.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {attachments.map((att) => (
+            <span
+              key={att.id}
+              className={
+                att.status === "error"
+                  ? "inline-flex max-w-full items-center gap-2 rounded-lg border border-[#5a2730] bg-[#1c0f12] px-2.5 py-1 text-xs text-[var(--color-bad)]"
+                  : "inline-flex max-w-full items-center gap-2 rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-surface-2)] px-2.5 py-1 text-xs text-[var(--color-muted)]"
+              }
+              title={att.status === "error" ? att.error : attachmentSummary(att)}
+            >
+              <span className="truncate">
+                {att.status === "error" ? `${att.name}: ${att.error}` : attachmentSummary(att)}
+              </span>
+              <button
+                aria-label={`Remove ${att.name}`}
+                className="text-[var(--color-faint)] hover:text-[var(--color-text)]"
+                type="button"
+                onClick={() => setAttachments((cur) => cur.filter((a) => a.id !== att.id))}
+              >
+                x
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Message + send */}
-      <div className="flex items-end gap-2">
+      <div
+        className="flex items-end gap-2"
+        onDragOver={(e) => {
+          e.preventDefault();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          void addFiles(Array.from(e.dataTransfer.files));
+        }}
+      >
+        <input
+          ref={fileRef}
+          type="file"
+          className="hidden"
+          accept="image/*,application/pdf"
+          multiple
+          onChange={(e) => {
+            void addFiles(Array.from(e.currentTarget.files ?? []));
+            e.currentTarget.value = "";
+          }}
+        />
+        <button
+          className="btn-ghost h-11 w-11 px-0"
+          type="button"
+          title="Attach image or PDF"
+          disabled={sending || !!streaming || processing}
+          onClick={() => fileRef.current?.click()}
+        >
+          +
+        </button>
         <textarea
           ref={taRef}
           className="input max-h-40 min-h-[44px] resize-none py-2.5"
@@ -101,6 +181,10 @@ export function Composer({
               e.preventDefault();
               submit();
             }
+          }}
+          onPaste={(e) => {
+            const files = Array.from(e.clipboardData.files);
+            if (files.length) void addFiles(files);
           }}
         />
         {streaming && onStop ? (

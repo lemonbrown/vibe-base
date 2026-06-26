@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type {
+  ChatAttachment,
   ChatMessage,
   Conversation,
   ConversationDetail,
@@ -12,6 +13,71 @@ import { loadOwnerSettings } from "./settings.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const VALID_KINDS: JobKind[] = ["chat", "ask", "build", "adjust"];
+const MAX_ATTACHMENTS = 5;
+const MAX_ATTACHMENT_TEXT = 120_000;
+const MAX_IMAGE_DATA_URL = 6_000_000;
+
+function normalizeAttachments(value: unknown): ChatAttachment[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, MAX_ATTACHMENTS).flatMap((raw): ChatAttachment[] => {
+    if (!raw || typeof raw !== "object") return [];
+    const obj = raw as Partial<ChatAttachment>;
+    const kind = obj.kind === "image" || obj.kind === "pdf" ? obj.kind : null;
+    if (!kind) return [];
+    const name = typeof obj.name === "string" && obj.name.trim() ? obj.name.trim().slice(0, 180) : "attachment";
+    const mimeType = typeof obj.mimeType === "string" ? obj.mimeType.slice(0, 120) : "";
+    const size = typeof obj.size === "number" && Number.isFinite(obj.size) ? obj.size : 0;
+    const id = typeof obj.id === "string" && obj.id.trim() ? obj.id.trim().slice(0, 80) : shortId("att");
+    if (kind === "image") {
+      const dataUrl = typeof obj.dataUrl === "string" ? obj.dataUrl : "";
+      if (!dataUrl.startsWith("data:image/") || dataUrl.length > MAX_IMAGE_DATA_URL) return [];
+      return [{ id, kind, name, mimeType, size, dataUrl }];
+    }
+    const text = typeof obj.text === "string" ? obj.text.slice(0, MAX_ATTACHMENT_TEXT) : "";
+    const pages = typeof obj.pages === "number" && Number.isFinite(obj.pages) ? obj.pages : undefined;
+    return [{ id, kind, name, mimeType: mimeType || "application/pdf", size, text, pages }];
+  });
+}
+
+function attachmentSummary(att: ChatAttachment): string {
+  if (att.kind === "pdf") {
+    const pages = att.pages ? `, ${att.pages} page${att.pages === 1 ? "" : "s"}` : "";
+    return `${att.name} (PDF${pages})`;
+  }
+  return `${att.name} (${att.mimeType || "image"})`;
+}
+
+function displayContent(content: string, attachments: ChatAttachment[]): string {
+  if (!attachments.length) return content;
+  const lines = attachments.map((att) => `- ${attachmentSummary(att)}`).join("\n");
+  return [content, `Attachments:\n${lines}`].filter(Boolean).join("\n\n");
+}
+
+function instructionWithAttachments(content: string, attachments: ChatAttachment[]): string {
+  if (!attachments.length) return content;
+  const blocks = attachments.map((att, idx) => {
+    if (att.kind === "pdf") {
+      return [
+        `Attachment ${idx + 1}: ${attachmentSummary(att)}`,
+        "Extracted PDF text:",
+        "```text",
+        att.text || "(No extractable text found.)",
+        "```",
+      ].join("\n");
+    }
+    return [
+      `Attachment ${idx + 1}: ${attachmentSummary(att)}`,
+      "Image data URL:",
+      att.dataUrl,
+    ].join("\n");
+  });
+  return [
+    content || "Please read the attached content.",
+    "---",
+    "Attached content supplied by the user:",
+    ...blocks,
+  ].join("\n\n");
+}
 
 interface ConvRow {
   id: string;
@@ -98,7 +164,13 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
   // a job for the owner's daemon to run with the selected local LLM.
   app.post<{
     Params: { id: string };
-    Body: { content?: string; kind?: string; targetApp?: string; planMode?: boolean };
+    Body: {
+      content?: string;
+      kind?: string;
+      targetApp?: string;
+      planMode?: boolean;
+      attachments?: ChatAttachment[];
+    };
   }>("/api/chat/:id/messages", async (req, reply) => {
     const actor = await requireUser(req, reply);
     if (!actor) return;
@@ -106,7 +178,12 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     if (!conv) return reply.code(404).send({ error: "conversation not found" });
 
     const content = (req.body?.content ?? "").trim();
-    if (!content) return reply.code(400).send({ error: "content is required" });
+    const attachments = normalizeAttachments(req.body?.attachments);
+    if (!content && !attachments.length) {
+      return reply.code(400).send({ error: "content or attachment is required" });
+    }
+    const userContent = displayContent(content, attachments);
+    const instruction = instructionWithAttachments(content, attachments);
     const kind = (VALID_KINDS as string[]).includes(req.body?.kind ?? "")
       ? (req.body!.kind as JobKind)
       : "chat";
@@ -125,7 +202,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
     await query(
       "INSERT INTO messages (id, conv_id, role, content, status) VALUES ($1,$2,'user',$3,'done')",
-      [userMsgId, conv.id, content]
+      [userMsgId, conv.id, userContent]
     );
     await query(
       "INSERT INTO messages (id, conv_id, role, content, status) VALUES ($1,$2,'assistant','','pending')",
@@ -143,7 +220,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
         asstMsgId,
         kind,
         targetApp,
-        content,
+        instruction,
         conv.llm_provider === settings.llmProvider ? conv.claude_session_id ?? null : null,
         planMode,
         stackPolicy,
@@ -157,7 +234,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
     if (conv.title === "New chat") {
       await query("UPDATE conversations SET title = $2, updated_at = now() WHERE id = $1", [
         conv.id,
-        content.slice(0, 60),
+        userContent.slice(0, 60),
       ]);
     } else {
       await query("UPDATE conversations SET updated_at = now() WHERE id = $1", [conv.id]);

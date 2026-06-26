@@ -231,6 +231,19 @@ export interface ConversationDetail extends Conversation {
   messages: ChatMessage[];
 }
 
+export type ChatAttachmentKind = "image" | "pdf";
+
+export interface ChatAttachment {
+  id: string;
+  kind: ChatAttachmentKind;
+  name: string;
+  mimeType: string;
+  size: number;
+  dataUrl?: string;
+  text?: string;
+  pages?: number;
+}
+
 /** A streamed event from the daemon as the selected LLM works (no secrets). */
 export interface JobEvent {
   seq: number;

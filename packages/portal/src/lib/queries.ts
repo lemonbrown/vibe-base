@@ -3,7 +3,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import type { PlatformRole, JobKind, OwnerSettings } from "@vibe/shared";
+import type { PlatformRole, JobKind, OwnerSettings, ChatAttachment } from "@vibe/shared";
 import { api } from "./api";
 
 /* -------------------------------- queries ------------------------------- */
@@ -160,6 +160,7 @@ export function useSendMessage(convId: string) {
       kind: JobKind;
       targetApp: string | null;
       planMode: boolean;
+      attachments?: ChatAttachment[];
     }) => api.sendMessage(convId, v),
   });
 }

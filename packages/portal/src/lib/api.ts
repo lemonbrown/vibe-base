@@ -8,6 +8,7 @@ import type {
   ConversationDetail,
   PlatformRole,
   JobKind,
+  ChatAttachment,
   MachineStatus,
   OwnerSettings,
 } from "@vibe/shared";
@@ -140,6 +141,7 @@ export const api = {
       kind: JobKind;
       targetApp: string | null;
       planMode: boolean;
+      attachments?: ChatAttachment[];
     }
   ) =>
     http<{

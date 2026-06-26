@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import type { ChatMessage, JobKind } from "@vibe/shared";
+import type { ChatAttachment, ChatMessage, JobKind } from "@vibe/shared";
 import {
   useConversation,
   useMachineStatus,
@@ -16,6 +16,7 @@ import {
 } from "../components/MarkdownMessage";
 import { MachinePill } from "../components/MachinePill";
 import { LoadingBlock, Spinner } from "../components/States";
+import { attachmentSummary } from "../lib/attachments";
 
 /** Live buffer for the assistant message currently streaming. */
 interface Live {
@@ -32,6 +33,14 @@ interface Live {
 function formatElapsed(sec: number): string {
   if (sec < 60) return `${sec}s`;
   return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+}
+
+function displayContent(content: string, attachments: ChatAttachment[] = []): string {
+  if (!attachments.length) return content;
+  const attachmentText = attachments
+    .map((att) => `- ${attachmentSummary(att)}`)
+    .join("\n");
+  return [content, `Attachments:\n${attachmentText}`].filter(Boolean).join("\n\n");
 }
 
 function Bubble({
@@ -207,13 +216,15 @@ export function ChatPage() {
     content: string,
     kind: JobKind,
     targetApp: string | null,
-    planMode: boolean
+    planMode: boolean,
+    attachments: ChatAttachment[] = []
   ) => {
     const now = new Date().toISOString();
+    const shownContent = displayContent(content, attachments);
     try {
-      const res = await send.mutateAsync({ content, kind, targetApp, planMode });
+      const res = await send.mutateAsync({ content, kind, targetApp, planMode, attachments });
       setOptimistic([
-        { id: res.userMessageId, role: "user", content, status: "done", createdAt: now },
+        { id: res.userMessageId, role: "user", content: shownContent, status: "done", createdAt: now },
         { id: res.assistantMessageId, role: "assistant", content: "", status: "pending", createdAt: now },
       ]);
       startStream(res.assistantMessageId);
