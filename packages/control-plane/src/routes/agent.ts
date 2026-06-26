@@ -217,7 +217,12 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
     );
     if (job.message_id) {
       const msgStatus = status === "failed" ? "failed" : status === "stopped" ? "stopped" : "done";
-      if (typeof finalText === "string" && status !== "stopped") {
+      // Only overwrite the message content if finalText is non-empty. When it is
+      // empty (e.g. Claude's result field is "" because the response was all
+      // thinking/tool blocks), preserve whatever was accumulated via streaming
+      // text events rather than wiping it to blank and showing "…" in the portal.
+      const hasContent = typeof finalText === "string" && finalText.trim().length > 0;
+      if (hasContent && status !== "stopped") {
         await query("UPDATE messages SET content = $2, status = $3 WHERE id = $1", [
           job.message_id,
           finalText,
