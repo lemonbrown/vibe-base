@@ -467,9 +467,20 @@ const DOCKERIGNORE = `node_modules
 .git
 .next
 dist
+.turbo
+tmp
 .env
 .env.local
 *.log
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
 .vibe/state.json
 `;
 
@@ -479,6 +490,18 @@ dist/
 .next/
 build/
 *.log
+.turbo/
+
+# Local/test databases - production gets platform-provided DATABASE_URL instead
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
 
 # Secrets — never commit these
 .env

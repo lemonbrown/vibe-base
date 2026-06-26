@@ -34,12 +34,20 @@ function toLogin(): never {
 }
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    credentials: "same-origin",
-    headers:
-      init?.body != null ? { "content-type": "application/json" } : undefined,
-    ...init,
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      credentials: "same-origin",
+      headers:
+        init?.body != null ? { "content-type": "application/json" } : undefined,
+      ...init,
+    });
+  } catch (err) {
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      throw new ApiError(0, "Offline. Reconnect to the VPS and try again.");
+    }
+    throw err;
+  }
   if (res.status === 401) toLogin();
   if (!res.ok) {
     const body = await res.text().catch(() => "");

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { classNames } from "../lib/format";
 
@@ -77,6 +78,20 @@ function SignOut() {
 
 export function AppShell() {
   const { pathname } = useLocation();
+  const [online, setOnline] = useState(() =>
+    typeof navigator === "undefined" ? true : navigator.onLine
+  );
+
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine);
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
+
   return (
     <div className="min-h-full">
       {/* Top bar */}
@@ -104,6 +119,12 @@ export function AppShell() {
           <SignOut />
         </div>
       </header>
+
+      {!online && (
+        <div className="border-b border-[#57401b] bg-[#1f1608] px-4 py-2 text-center text-xs font-medium text-[var(--color-warn)]">
+          Offline. The portal shell is available, but live app data and actions require the VPS.
+        </div>
+      )}
 
       {/* Content — bottom padding leaves room for the mobile tab bar. */}
       <main className="mx-auto max-w-5xl px-4 pb-24 pt-5 sm:px-6 sm:pb-12">

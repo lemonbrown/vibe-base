@@ -180,10 +180,11 @@ async function runDeploy(
 
     // Provision backend capabilities and assemble the container environment.
     const env: Record<string, string> = {
+      ...(await userEnv(app.id)),
       VIBE_APP_ID: app.id,
       VIBE_APP_NAME: app.name,
       VIBE_ENV: environment,
-      ...(await userEnv(app.id)),
+      NODE_ENV: environment === "prod" ? "production" : "test",
     };
     if (m.capabilities.database) {
       env.DATABASE_URL = await provisionDatabase(app.id, environment);
@@ -214,6 +215,17 @@ async function runDeploy(
       const mig = await runOneOff(imageTag, env, port, m.database.migrations);
       await appendLog(deploymentId, `[migrate]\n${mig.stdout}\n${mig.stderr}`);
       if (mig.code !== 0) throw new Error("migration failed");
+    }
+
+    if (m.capabilities.database && m.database?.seed) {
+      if (environment === "test") {
+        await setDeploy(deploymentId, { status: "migrating" });
+        const seed = await runOneOff(imageTag, env, port, m.database.seed);
+        await appendLog(deploymentId, `[seed:test]\n${seed.stdout}\n${seed.stderr}`);
+        if (seed.code !== 0) throw new Error("seed failed");
+      } else {
+        await appendLog(deploymentId, "[vibe] database.seed is test-only; skipping for production");
+      }
     }
 
     await setDeploy(deploymentId, { status: "starting" });
