@@ -92,9 +92,11 @@ LLM generation (when \`capabilities.llm: true\` in vibe.app.yaml):
   - \`VIBE_OWNER_TOKEN\` — bearer token for the owner's account.
 - Call \`POST \${VIBE_CONTROL_URL}/api/apps/\${VIBE_APP_ID}/llm\` from your server code.
   Never expose \`VIBE_OWNER_TOKEN\` to the browser.
-- Body: \`{ "prompt": "...", "systemPrompt": "..." }\` — \`systemPrompt\` is optional;
+- Body: \`{ "prompt": "...", "systemPrompt": "...", "model": "smart" }\` — \`systemPrompt\` is optional;
   use it to set persistent context (e.g. "You are a Bible curriculum assistant.")
-  without mixing it into each user prompt.
+  without mixing it into each user prompt. \`model\` is optional and must be one
+  of \`"fast"\`, \`"smart"\`, or \`"deep"\`; Vibe Base maps that alias to an
+  owner-approved provider model.
 - Response: **Server-Sent Events** — each \`data:\` line is a JSON \`JobEvent\`:
   \`{ seq, type, data }\`. Collect \`type === "text"\` payloads; stop on \`type === "done"\`.
 - Example (Node/fetch):
@@ -105,7 +107,7 @@ LLM generation (when \`capabilities.llm: true\` in vibe.app.yaml):
       'Authorization': \`Bearer \${process.env.VIBE_OWNER_TOKEN}\`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ systemPrompt: 'You are a Bible curriculum assistant.', prompt }),
+    body: JSON.stringify({ systemPrompt: 'You are a Bible curriculum assistant.', model: 'smart', prompt }),
   });
   let output = '';
   for await (const chunk of res.body) {
@@ -117,8 +119,9 @@ LLM generation (when \`capabilities.llm: true\` in vibe.app.yaml):
     }
   }
   \`\`\`
-- The daemon uses the owner's configured model and provider. Your app pays no
-  inference cost and needs no model selection logic.
+- The daemon uses the owner's configured provider. Apps may choose only the
+  coarse \`fast\` / \`smart\` / \`deep\` model alias; they cannot pass raw provider
+  model IDs.
 
 Deploying (GitHub is the default path):
 - Use \`vibe test\` for feature verification. It deploys to an isolated test
