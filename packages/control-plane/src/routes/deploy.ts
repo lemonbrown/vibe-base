@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { AppEnvironment } from "@vibe/shared";
 import { query } from "../db.js";
 import { audit } from "../lib/audit.js";
 import { shortId } from "../lib/ids.js";
@@ -21,7 +22,10 @@ import { provisionStorage, storageEnvFor } from "../services/storage.js";
 import { upsertAppRoute } from "../services/caddy.js";
 import {
   deploymentToContract,
+  ensureAppEnvironment,
+  envSubdomain,
   getApp,
+  getAppEnvironment,
   getAppRepo,
   getDeployment,
   recentDeployments,
@@ -29,6 +33,11 @@ import {
 } from "../repo.js";
 import { createDeployment, setDeploymentStatus } from "../services/github.js";
 import { requireOwner } from "./guards.js";
+
+function normalizeEnv(value: unknown, fallback: AppEnvironment = "prod"): AppEnvironment {
+  if (value === "test" || value === "prod") return value;
+  return fallback;
+}
 
 async function setDeploy(
   id: string,
@@ -112,10 +121,14 @@ async function reportGithub(
   }
 }
 
-async function enqueueVerifyJob(app: AppRow, ownerEmail: string): Promise<void> {
+async function enqueueVerifyJob(
+  app: AppRow,
+  ownerEmail: string,
+  environment: AppEnvironment
+): Promise<void> {
   const cfg = loadConfig();
-  const appUrl = `https://${app.subdomain}.${cfg.appsDomain}`;
-  const instruction = JSON.stringify({ appUrl, ownerEmail });
+  const appUrl = `https://${envSubdomain(app.subdomain, environment)}.${cfg.appsDomain}`;
+  const instruction = JSON.stringify({ appUrl, ownerEmail, environment });
   const id = shortId("job");
   await query(
     `INSERT INTO jobs (id, kind, target_app, instruction, owner_email, status, llm_provider, llm_model)
@@ -129,14 +142,18 @@ async function runDeploy(
   app: AppRow,
   deploymentId: string,
   source: DeploySource,
+  environment: AppEnvironment,
   ownerEmail?: string
 ): Promise<void> {
   const m = app.manifest;
-  const container = `vibe-${app.id}-${deploymentId.replace(/[^a-z0-9]/g, "")}`;
+  const envSuffix = environment === "prod" ? "" : `-${environment}`;
+  const container = `vibe-${app.id}${envSuffix}-${deploymentId.replace(/[^a-z0-9]/g, "")}`;
   const port = m.runtime.port;
   let contextDir: string | null = null;
 
-  const prevDeployId = app.current_deployment_id;
+  const appEnv = await ensureAppEnvironment(app.id, environment);
+  const prevDeployId =
+    appEnv.current_deployment_id ?? (environment === "prod" ? app.current_deployment_id : null);
   const prevDeploy = prevDeployId ? await getDeployment(prevDeployId) : null;
 
   try {
@@ -165,19 +182,25 @@ async function runDeploy(
     const env: Record<string, string> = {
       VIBE_APP_ID: app.id,
       VIBE_APP_NAME: app.name,
+      VIBE_ENV: environment,
       ...(await userEnv(app.id)),
     };
     if (m.capabilities.database) {
-      env.DATABASE_URL = await provisionDatabase(app.id);
+      env.DATABASE_URL = await provisionDatabase(app.id, environment);
     }
     if (m.capabilities.storage) {
-      await provisionStorage(app.id);
-      Object.assign(env, (await storageEnvFor(app.id)) ?? {});
+      await provisionStorage(app.id, environment);
+      Object.assign(env, (await storageEnvFor(app.id, environment)) ?? {});
     }
     if (m.capabilities.email) {
-      const emailEnv = emailEnvFor();
-      if (emailEnv) Object.assign(env, emailEnv);
-      else await appendLog(deploymentId, "[vibe] email capability enabled but no platform SMTP configured — skipping");
+      if (environment === "prod") {
+        const emailEnv = emailEnvFor();
+        if (emailEnv) Object.assign(env, emailEnv);
+        else await appendLog(deploymentId, "[vibe] email capability enabled but no platform SMTP configured — skipping");
+      } else {
+        env.EMAIL_CAPTURE = "true";
+        await appendLog(deploymentId, "[vibe] test environment: real email provider disabled; EMAIL_CAPTURE=true");
+      }
     }
     if (m.capabilities.llm) {
       const cfg = loadConfig();
@@ -209,7 +232,13 @@ async function runDeploy(
     }
 
     // Flip the proxy to the new container, then retire the old one.
-    await upsertAppRoute(app.id, app.subdomain, container, port);
+    await upsertAppRoute(
+      app.id,
+      envSubdomain(app.subdomain, environment),
+      container,
+      port,
+      environment
+    );
     await setDeploy(deploymentId, {
       status: "live",
       health: "healthy",
@@ -217,22 +246,30 @@ async function runDeploy(
       rollback_target: prevDeploy?.container_name ?? null,
     });
     await query(
-      "UPDATE apps SET status = 'live', current_deployment_id = $2, updated_at = now() WHERE id = $1",
-      [app.id, deploymentId]
+      `UPDATE app_environments
+       SET status = 'live', current_deployment_id = $3, updated_at = now()
+       WHERE app_id = $1 AND environment = $2`,
+      [app.id, environment, deploymentId]
     );
+    if (environment === "prod") {
+      await query(
+        "UPDATE apps SET status = 'live', current_deployment_id = $2, updated_at = now() WHERE id = $1",
+        [app.id, deploymentId]
+      );
+    }
 
-    if (ownerEmail) await enqueueVerifyJob(app, ownerEmail);
+    if (ownerEmail) await enqueueVerifyJob(app, ownerEmail, environment);
 
     if (prevDeploy?.container_name && prevDeploy.container_name !== container) {
       // Keep it stopped (not removed) so `vibe deploy rollback` can revive it.
       await stopContainer(prevDeploy.container_name);
     }
 
-    await audit({ action: "deploy.success", appId: app.id, detail: { deploymentId } });
+    await audit({ action: "deploy.success", appId: app.id, detail: { deploymentId, environment } });
     await reportGithub(
       source,
       "success",
-      `https://${app.subdomain}.${loadConfig().appsDomain}`
+      `https://${envSubdomain(app.subdomain, environment)}.${loadConfig().appsDomain}`
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -242,11 +279,17 @@ async function runDeploy(
       error: message,
       completed_at: new Date(),
     });
+    await query(
+      `UPDATE app_environments
+       SET status = 'failed', updated_at = now()
+       WHERE app_id = $1 AND environment = $2`,
+      [app.id, environment]
+    );
     await audit({
       action: "deploy.failed",
       appId: app.id,
       success: false,
-      detail: { deploymentId, message },
+      detail: { deploymentId, environment, message },
     });
     await reportGithub(source, "failure");
   } finally {
@@ -256,26 +299,28 @@ async function runDeploy(
 
 export async function deployRoutes(app: FastifyInstance): Promise<void> {
   // Kick off a deploy from an uploaded build context (application/gzip body).
-  app.post<{ Params: { id: string }; Body: { tarPath: string } }>(
+  app.post<{ Params: { id: string }; Querystring: { env?: string }; Body: { tarPath: string } }>(
     "/api/apps/:id/deploy",
     async (req, reply) => {
       const actor = await requireOwner(req, reply);
       if (!actor) return;
       const appRow = await getApp(req.params.id);
       if (!appRow) return reply.code(404).send({ error: "app not found" });
+      const environment = normalizeEnv(req.query.env, "test");
+      await ensureAppEnvironment(appRow.id, environment);
 
       const { tarPath } = req.body ?? {};
       if (!tarPath) return reply.code(400).send({ error: "expected application/gzip build context" });
 
       const deploymentId = shortId("dep");
       await query(
-        "INSERT INTO deployments (id, app_id, status) VALUES ($1, $2, 'queued')",
-        [deploymentId, appRow.id]
+        "INSERT INTO deployments (id, app_id, environment, status) VALUES ($1, $2, $3, 'queued')",
+        [deploymentId, appRow.id, environment]
       );
-      await audit({ actorEmail: actor.email, action: "deploy.start", appId: appRow.id, detail: { deploymentId } });
+      await audit({ actorEmail: actor.email, action: "deploy.start", appId: appRow.id, detail: { deploymentId, environment } });
 
       // Run the pipeline in the background; client polls the deployment.
-      void runDeploy(appRow, deploymentId, { kind: "context", tarPath }, actor.email);
+      void runDeploy(appRow, deploymentId, { kind: "context", tarPath }, environment, actor.email);
 
       return reply.code(202).send({ deploymentId, appId: appRow.id });
     }
@@ -284,7 +329,7 @@ export async function deployRoutes(app: FastifyInstance): Promise<void> {
   // Deploy a prebuilt image (GitHub Actions builds + pushes, then calls this).
   app.post<{
     Params: { id: string };
-    Body: { image?: string; sha?: string; ref?: string };
+    Body: { image?: string; sha?: string; ref?: string; env?: string };
   }>("/api/apps/:id/deploy/image", async (req, reply) => {
     const actor = await requireOwner(req, reply);
     if (!actor) return;
@@ -292,19 +337,21 @@ export async function deployRoutes(app: FastifyInstance): Promise<void> {
     if (!appRow) return reply.code(404).send({ error: "app not found" });
 
     const { image, sha, ref } = req.body ?? {};
+    const environment = normalizeEnv(req.body?.env, "test");
+    await ensureAppEnvironment(appRow.id, environment);
     if (!image) return reply.code(400).send({ error: "expected { image } in body" });
 
     const deploymentId = shortId("dep");
     await query(
-      `INSERT INTO deployments (id, app_id, status, source, git_sha, git_ref)
-       VALUES ($1, $2, 'queued', 'image', $3, $4)`,
-      [deploymentId, appRow.id, sha ?? null, ref ?? null]
+      `INSERT INTO deployments (id, app_id, environment, status, source, git_sha, git_ref)
+       VALUES ($1, $2, $3, 'queued', 'image', $4, $5)`,
+      [deploymentId, appRow.id, environment, sha ?? null, ref ?? null]
     );
     await audit({
       actorEmail: actor.email,
       action: "deploy.start",
       appId: appRow.id,
-      detail: { deploymentId, image, sha },
+      detail: { deploymentId, environment, image, sha },
     });
 
     // If the app has a linked repo and we know the commit, open a GitHub
@@ -314,7 +361,7 @@ export async function deployRoutes(app: FastifyInstance): Promise<void> {
     const gitRef = sha ?? ref;
     if (linked && gitRef) {
       try {
-        const ghId = await createDeployment(linked.repo_full_name, gitRef);
+        const ghId = await createDeployment(linked.repo_full_name, gitRef, environment);
         await setDeploymentStatus(linked.repo_full_name, ghId, "in_progress");
         github = { repo: linked.repo_full_name, deploymentId: ghId };
       } catch (err) {
@@ -322,8 +369,47 @@ export async function deployRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    void runDeploy(appRow, deploymentId, { kind: "image", image, github }, actor.email);
+    void runDeploy(appRow, deploymentId, { kind: "image", image, github }, environment, actor.email);
 
+    return reply.code(202).send({ deploymentId, appId: appRow.id });
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body: { from?: string; to?: string };
+  }>("/api/apps/:id/promote", async (req, reply) => {
+    const actor = await requireOwner(req, reply);
+    if (!actor) return;
+    const appRow = await getApp(req.params.id);
+    if (!appRow) return reply.code(404).send({ error: "app not found" });
+
+    const from = normalizeEnv(req.body?.from ?? "test");
+    const to = normalizeEnv(req.body?.to ?? "prod");
+    if (from === to) return reply.code(400).send({ error: "from and to environments must differ" });
+
+    const sourceEnv = await getAppEnvironment(appRow.id, from);
+    const sourceDep = sourceEnv?.current_deployment_id
+      ? await getDeployment(sourceEnv.current_deployment_id)
+      : null;
+    if (!sourceDep?.image_tag || sourceDep.status !== "live") {
+      return reply.code(409).send({ error: `${from} has no live deployment image to promote` });
+    }
+
+    await ensureAppEnvironment(appRow.id, to);
+    const deploymentId = shortId("dep");
+    await query(
+      `INSERT INTO deployments (id, app_id, environment, status, source, image_tag, git_sha, git_ref)
+       VALUES ($1, $2, $3, 'queued', 'image', $4, $5, $6)`,
+      [deploymentId, appRow.id, to, sourceDep.image_tag, sourceDep.git_sha, sourceDep.git_ref]
+    );
+    await audit({
+      actorEmail: actor.email,
+      action: "deploy.promote",
+      appId: appRow.id,
+      detail: { deploymentId, from, to, image: sourceDep.image_tag },
+    });
+
+    void runDeploy(appRow, deploymentId, { kind: "image", image: sourceDep.image_tag }, to, actor.email);
     return reply.code(202).send({ deploymentId, appId: appRow.id });
   });
 
@@ -338,26 +424,29 @@ export async function deployRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
-  app.get<{ Params: { id: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { env?: string } }>(
     "/api/apps/:id/deployments",
     async (req, reply) => {
       const actor = await requireOwner(req, reply);
       if (!actor) return;
-      const rows = await recentDeployments(req.params.id, 20);
+      const rows = await recentDeployments(req.params.id, normalizeEnv(req.query.env), 20);
       return reply.send({ deployments: rows.map(deploymentToContract) });
     }
   );
 
   // Runtime + build logs for the current (or specified) deployment.
-  app.get<{ Params: { id: string }; Querystring: { build?: string; tail?: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { build?: string; tail?: string; env?: string } }>(
     "/api/apps/:id/logs",
     async (req, reply) => {
       const actor = await requireOwner(req, reply);
       if (!actor) return;
       const appRow = await getApp(req.params.id);
       if (!appRow) return reply.code(404).send({ error: "app not found" });
-      const dep = appRow.current_deployment_id
-        ? await getDeployment(appRow.current_deployment_id)
+      const environment = normalizeEnv(req.query.env);
+      const appEnv = await getAppEnvironment(appRow.id, environment);
+      const currentId = appEnv?.current_deployment_id ?? (environment === "prod" ? appRow.current_deployment_id : null);
+      const dep = currentId
+        ? await getDeployment(currentId)
         : null;
       if (req.query.build) {
         return reply.send({ log: dep?.build_log ?? "" });
@@ -369,14 +458,17 @@ export async function deployRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // Rollback: revive the previous container and re-point the route.
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { id: string }; Body: { env?: string } }>(
     "/api/apps/:id/rollback",
     async (req, reply) => {
       const actor = await requireOwner(req, reply);
       if (!actor) return;
       const appRow = await getApp(req.params.id);
       if (!appRow) return reply.code(404).send({ error: "app not found" });
-      const cur = appRow.current_deployment_id ? await getDeployment(appRow.current_deployment_id) : null;
+      const environment = normalizeEnv(req.body?.env);
+      const appEnv = await getAppEnvironment(appRow.id, environment);
+      const currentId = appEnv?.current_deployment_id ?? (environment === "prod" ? appRow.current_deployment_id : null);
+      const cur = currentId ? await getDeployment(currentId) : null;
       const target = cur?.rollback_target;
       if (!target) return reply.code(409).send({ error: "no rollback target available" });
 
@@ -391,14 +483,22 @@ export async function deployRoutes(app: FastifyInstance): Promise<void> {
         [target]
       );
       const port = prev.rows[0]?.port ?? loadConfig().port;
-      await upsertAppRoute(appRow.id, appRow.subdomain, target, port);
+      await upsertAppRoute(appRow.id, envSubdomain(appRow.subdomain, environment), target, port, environment);
       if (prev.rows[0]) {
-        await query("UPDATE apps SET current_deployment_id = $2 WHERE id = $1", [
-          appRow.id,
-          prev.rows[0].id,
-        ]);
+        await query(
+          `UPDATE app_environments
+           SET status = 'live', current_deployment_id = $3, updated_at = now()
+           WHERE app_id = $1 AND environment = $2`,
+          [appRow.id, environment, prev.rows[0].id]
+        );
+        if (environment === "prod") {
+          await query("UPDATE apps SET current_deployment_id = $2 WHERE id = $1", [
+            appRow.id,
+            prev.rows[0].id,
+          ]);
+        }
       }
-      await audit({ actorEmail: actor.email, action: "deploy.rollback", appId: appRow.id });
+      await audit({ actorEmail: actor.email, action: "deploy.rollback", appId: appRow.id, detail: { environment } });
       return reply.send({ rolledBackTo: target });
     }
   );

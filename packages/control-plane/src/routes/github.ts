@@ -44,6 +44,7 @@ export async function githubRoutes(app: FastifyInstance): Promise<void> {
       await setActionsSecret(repo.fullName, "VIBE_DEPLOY_TOKEN", cfg.ownerToken);
       await setActionsVariable(repo.fullName, "VIBE_API_URL", `https://${cfg.controlPlaneDomain}`);
       await setActionsVariable(repo.fullName, "VIBE_APP_ID", appRow.id);
+      await setActionsVariable(repo.fullName, "VIBE_DEPLOY_ENV", "test");
       // Let the workflow's GITHUB_TOKEN push the built image to GHCR.
       await setDefaultWorkflowPermissions(repo.fullName, "write");
     } catch (err) {

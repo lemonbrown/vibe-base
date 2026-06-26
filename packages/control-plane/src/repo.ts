@@ -1,4 +1,4 @@
-import type { AppSummary, Deployment, Health, Manifest } from "@vibe/shared";
+import type { AppEnvironment, AppSummary, Deployment, Health, Manifest } from "@vibe/shared";
 import { loadConfig } from "./config.js";
 import { one, query } from "./db.js";
 
@@ -20,6 +20,7 @@ export interface AppRow {
 export interface DeploymentRow {
   id: string;
   app_id: string;
+  environment: AppEnvironment;
   status: string;
   image_tag: string | null;
   container_name: string | null;
@@ -33,6 +34,15 @@ export interface DeploymentRow {
   git_ref: string | null;
   created_at: Date;
   completed_at: Date | null;
+}
+
+export interface AppEnvironmentRow {
+  app_id: string;
+  environment: AppEnvironment;
+  status: string;
+  current_deployment_id: string | null;
+  created_at: Date;
+  updated_at: Date;
 }
 
 export interface AppRepoRow {
@@ -82,19 +92,51 @@ export async function getDeployment(id: string): Promise<DeploymentRow | null> {
 
 export async function recentDeployments(
   appId: string,
+  environment: AppEnvironment = "prod",
   limit = 5
 ): Promise<DeploymentRow[]> {
   const res = await query<DeploymentRow>(
-    "SELECT * FROM deployments WHERE app_id = $1 ORDER BY created_at DESC LIMIT $2",
-    [appId, limit]
+    "SELECT * FROM deployments WHERE app_id = $1 AND environment = $2 ORDER BY created_at DESC LIMIT $3",
+    [appId, environment, limit]
   );
   return res.rows;
+}
+
+export async function ensureAppEnvironment(
+  appId: string,
+  environment: AppEnvironment
+): Promise<AppEnvironmentRow> {
+  await query(
+    `INSERT INTO app_environments (app_id, environment)
+     VALUES ($1, $2)
+     ON CONFLICT (app_id, environment) DO NOTHING`,
+    [appId, environment]
+  );
+  return (await one<AppEnvironmentRow>(
+    "SELECT * FROM app_environments WHERE app_id = $1 AND environment = $2",
+    [appId, environment]
+  ))!;
+}
+
+export async function getAppEnvironment(
+  appId: string,
+  environment: AppEnvironment = "prod"
+): Promise<AppEnvironmentRow | null> {
+  return one<AppEnvironmentRow>(
+    "SELECT * FROM app_environments WHERE app_id = $1 AND environment = $2",
+    [appId, environment]
+  );
+}
+
+export function envSubdomain(subdomain: string, environment: AppEnvironment): string {
+  return environment === "prod" ? subdomain : `${subdomain}-${environment}`;
 }
 
 export function deploymentToContract(row: DeploymentRow): Deployment {
   return {
     id: row.id,
     appId: row.app_id,
+    environment: row.environment ?? "prod",
     status: row.status as Deployment["status"],
     imageTag: row.image_tag,
     health: row.health as Health,
@@ -107,22 +149,29 @@ export function deploymentToContract(row: DeploymentRow): Deployment {
   };
 }
 
-export async function appSummary(row: AppRow): Promise<AppSummary> {
+export async function appSummary(
+  row: AppRow,
+  environment: AppEnvironment = "prod"
+): Promise<AppSummary> {
   const cfg = loadConfig();
-  const current = row.current_deployment_id
-    ? await getDeployment(row.current_deployment_id)
+  const env = await getAppEnvironment(row.id, environment);
+  const currentId = env?.current_deployment_id ?? (environment === "prod" ? row.current_deployment_id : null);
+  const current = currentId
+    ? await getDeployment(currentId)
     : null;
+  const status = env?.status ?? (environment === "prod" ? row.status : "registered");
   return {
     id: row.id,
     name: row.name,
+    environment,
     visibility: row.visibility,
-    status: row.status,
+    status,
     url:
-      row.status === "live"
-        ? `https://${row.subdomain}.${cfg.appsDomain}`
+      status === "live"
+        ? `https://${envSubdomain(row.subdomain, environment)}.${cfg.appsDomain}`
         : null,
     health: (current?.health as Health) ?? "unknown",
-    currentDeploymentId: row.current_deployment_id,
+    currentDeploymentId: currentId,
     lastDeployedAt: current?.completed_at
       ? current.completed_at.toISOString()
       : null,

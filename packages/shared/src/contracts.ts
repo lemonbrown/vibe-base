@@ -19,6 +19,9 @@ export type DeployStatus = z.infer<typeof DeployStatusSchema>;
 export const HealthSchema = z.enum(["healthy", "unhealthy", "unknown"]);
 export type Health = z.infer<typeof HealthSchema>;
 
+export const AppEnvironmentSchema = z.enum(["test", "prod"]);
+export type AppEnvironment = z.infer<typeof AppEnvironmentSchema>;
+
 /* ----------------------------- API: apps ------------------------------ */
 
 export const RegisterAppRequestSchema = z.object({
@@ -29,6 +32,7 @@ export type RegisterAppRequest = z.infer<typeof RegisterAppRequestSchema>;
 export const AppSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
+  environment: AppEnvironmentSchema.default("prod"),
   visibility: z.string(),
   status: z.string(),
   url: z.string().nullable(),
@@ -47,6 +51,7 @@ export type DeploySource = z.infer<typeof DeploySourceSchema>;
 export const DeploymentSchema = z.object({
   id: z.string(),
   appId: z.string(),
+  environment: AppEnvironmentSchema.default("prod"),
   status: DeployStatusSchema,
   imageTag: z.string().nullable(),
   health: HealthSchema,

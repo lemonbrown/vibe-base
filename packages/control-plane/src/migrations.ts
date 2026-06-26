@@ -261,6 +261,36 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS portal_invites_email_idx ON portal_invites(email);
     `,
   },
+  {
+    id: "0010_app_environments",
+    sql: `
+      ALTER TABLE deployments ADD COLUMN IF NOT EXISTS environment TEXT NOT NULL DEFAULT 'prod';
+      CREATE INDEX IF NOT EXISTS deployments_app_env_idx ON deployments(app_id, environment, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS app_environments (
+        app_id                TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+        environment           TEXT NOT NULL,
+        status                TEXT NOT NULL DEFAULT 'registered',
+        current_deployment_id TEXT,
+        created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (app_id, environment)
+      );
+
+      INSERT INTO app_environments (app_id, environment, status, current_deployment_id, created_at, updated_at)
+      SELECT id, 'prod', status, current_deployment_id, created_at, updated_at
+      FROM apps
+      ON CONFLICT (app_id, environment) DO NOTHING;
+
+      ALTER TABLE db_provisions ADD COLUMN IF NOT EXISTS environment TEXT NOT NULL DEFAULT 'prod';
+      ALTER TABLE db_provisions DROP CONSTRAINT IF EXISTS db_provisions_pkey;
+      ALTER TABLE db_provisions ADD PRIMARY KEY (app_id, environment);
+
+      ALTER TABLE storage_provisions ADD COLUMN IF NOT EXISTS environment TEXT NOT NULL DEFAULT 'prod';
+      ALTER TABLE storage_provisions DROP CONSTRAINT IF EXISTS storage_provisions_pkey;
+      ALTER TABLE storage_provisions ADD PRIMARY KEY (app_id, environment);
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

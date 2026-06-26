@@ -58,13 +58,13 @@ export const api = {
 
   listApps: () => call<{ apps: AppSummary[] }>("GET", "/api/apps"),
 
-  getStatus: (id: string) =>
-    call<{ status: AppStatus }>("GET", `/api/apps/${id}/status`),
+  getStatus: (id: string, env = "prod") =>
+    call<{ status: AppStatus }>("GET", `/api/apps/${id}/status?env=${encodeURIComponent(env)}`),
 
-  deploy: (id: string, tarGz: Buffer) =>
+  deploy: (id: string, tarGz: Buffer, env = "prod") =>
     call<{ deploymentId: string; appId: string }>(
       "POST",
-      `/api/apps/${id}/deploy`,
+      `/api/apps/${id}/deploy?env=${encodeURIComponent(env)}`,
       { raw: tarGz, contentType: "application/gzip" }
     ),
 
@@ -74,10 +74,10 @@ export const api = {
       `/api/deployments/${id}`
     ),
 
-  logs: (id: string, build: boolean, tail = 200) =>
+  logs: (id: string, build: boolean, tail = 200, env = "prod") =>
     call<{ log: string }>(
       "GET",
-      `/api/apps/${id}/logs?${build ? "build=1" : `tail=${tail}`}`
+      `/api/apps/${id}/logs?env=${encodeURIComponent(env)}&${build ? "build=1" : `tail=${tail}`}`
     ),
 
   invite: (id: string, email: string, role: string) =>
@@ -87,12 +87,17 @@ export const api = {
       { body: { email, role } }
     ),
 
-  rollback: (id: string) =>
-    call<{ rolledBackTo: string }>("POST", `/api/apps/${id}/rollback`),
+  rollback: (id: string, env = "prod") =>
+    call<{ rolledBackTo: string }>("POST", `/api/apps/${id}/rollback`, { body: { env } }),
+
+  promote: (id: string, from = "test", to = "prod") =>
+    call<{ deploymentId: string; appId: string }>("POST", `/api/apps/${id}/promote`, {
+      body: { from, to },
+    }),
 
   deployImage: (
     id: string,
-    body: { image: string; sha?: string; ref?: string }
+    body: { image: string; sha?: string; ref?: string; env?: string }
   ) =>
     call<{ deploymentId: string; appId: string }>(
       "POST",

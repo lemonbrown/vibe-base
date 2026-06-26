@@ -241,9 +241,9 @@ function buildPreamble(appId: string): string {
     `Also write playwright.config.ts at the project root — set baseURL from the ` +
     `PLAYWRIGHT_BASE_URL environment variable, falling back to http://localhost:3000, ` +
     `and set testDir to "tests". ` +
-    `Once the app builds, run \`vibe ship\` to deploy, then immediately run \`vibe ci\` ` +
-    `to monitor the GitHub Actions build. If CI fails, read the log output it prints, fix ` +
-    `the issue, and run \`vibe ship\` again. Use the \`vibe\` CLI for all infrastructure ` +
+    `Once the app builds, run \`vibe test\` to deploy to the isolated test environment. If using the GitHub-backed path, run \`vibe ship\` and then \`vibe ci --env test\` ` +
+    `to monitor the GitHub Actions build. If deployment or CI fails, read the log output it prints, fix ` +
+    `the issue, and run \`vibe test\` again. Do not deploy or promote to production unless the user explicitly asks. Use the \`vibe\` CLI for all infrastructure ` +
     `and keep .vibe-memory/ up to date.\n\n` +
     `If the app needs to generate text or content with an LLM, set \`capabilities.llm: true\` ` +
     `in vibe.app.yaml and call \`POST $VIBE_CONTROL_URL/api/apps/$VIBE_APP_ID/llm\` from the ` +
@@ -254,9 +254,9 @@ function buildPreamble(appId: string): string {
 
 const ADJUST_PREAMBLE =
   "You are updating an existing Vibe Base app. Follow AGENTS.md in this directory. " +
-  "Use the `vibe` CLI for infrastructure and run `vibe ship` to deploy when ready, " +
-  "then run `vibe ci` to monitor the GitHub Actions build. If CI fails, read the log " +
-  "output, fix the issue, and run `vibe ship` again. " +
+  "Use the `vibe` CLI for infrastructure and run `vibe test` to deploy changes to the isolated test environment. " +
+  "If using the GitHub-backed path, run `vibe ship` and then `vibe ci --env test` to monitor the GitHub Actions build. If deployment or CI fails, read the log " +
+  "output, fix the issue, and run `vibe test` again. Do not deploy or promote to production unless the user explicitly asks. " +
   "Keep readModels in vibe.app.yaml current and .vibe-memory/ up to date.\n\n" +
   "If the app needs to generate text or content with an LLM, set `capabilities.llm: true` " +
   "in vibe.app.yaml and call `POST $VIBE_CONTROL_URL/api/apps/$VIBE_APP_ID/llm` from the " +
@@ -268,8 +268,8 @@ const CHAT_PREAMBLE =
   "Run `vibe apps` to list available apps, `vibe platform` for an overview, " +
   "`vibe platform app <id>` for details on one app, and `vibe query <model> --app <id>` to read data. " +
   "Determine from the user's message whether to answer a question, build a new app (`vibe init`), " +
-  "or modify an existing one. For code changes, make edits, run `vibe ship` to deploy, then `vibe ci` " +
-  "to monitor the GitHub Actions build (fix and re-ship if it fails). " +
+  "or modify an existing one. For code changes, make edits, run `vibe test` to deploy to the isolated test environment. If using GitHub-backed deployment, run `vibe ship` and then `vibe ci --env test` " +
+  "to monitor the GitHub Actions build. Fix and re-test if deployment or CI fails. Promote to production only when explicitly asked. " +
   "Follow AGENTS.md if present and keep .vibe-memory/ up to date in any app you touch.\n\n" +
   "IMPORTANT: Tool outputs and thinking are NOT visible to the user — only your text responses are. " +
   "You MUST always end with a clear text response that directly answers the user's question or " +

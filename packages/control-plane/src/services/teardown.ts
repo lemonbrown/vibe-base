@@ -31,6 +31,7 @@ export async function destroyApp(
 
   // 1. Stop routing so no request hits a container we're about to remove.
   await removeAppRoute(appId);
+  await removeAppRoute(appId, "test");
 
   // 2. Remove every container (current + historical) and the images built for
   //    them. `rm -f` covers running and stopped containers alike.
@@ -53,8 +54,16 @@ export async function destroyApp(
   //         cached read-model connection pool first so we aren't holding open
   //         sessions against the database we're about to drop.
   await closeAppPool(appId);
-  await deprovisionDatabase(appId);
-  await deprovisionStorage(appId);
+  const dbEnvs = await query<{ environment: "test" | "prod" }>(
+    "SELECT environment FROM db_provisions WHERE app_id = $1",
+    [appId]
+  );
+  for (const row of dbEnvs.rows) await deprovisionDatabase(appId, row.environment);
+  const storageEnvs = await query<{ environment: "test" | "prod" }>(
+    "SELECT environment FROM storage_provisions WHERE app_id = $1",
+    [appId]
+  );
+  for (const row of storageEnvs.rows) await deprovisionStorage(appId, row.environment);
 
   // 5. Remove all platform records. deployments, db_provisions,
   //    storage_provisions, env_vars, app_members, invites and app_repos all

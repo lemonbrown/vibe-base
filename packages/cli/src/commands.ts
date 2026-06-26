@@ -266,13 +266,14 @@ async function ghCmd(args: string[], dir: string): Promise<{ ok: boolean; out: s
  * then print failed step logs so the LLM can diagnose and fix the issue.
  * Requires the `gh` CLI installed and authenticated (`gh auth login`).
  */
-export async function cmdCi(): Promise<void> {
+export async function cmdCi(opts: { env?: string } = {}): Promise<void> {
   const dir = cwd();
+  const env = normalizeEnv(opts.env);
 
   const sha = (await git(["rev-parse", "HEAD"], dir)).out;
   if (!sha) throw new Error("Not in a git repo or no commits.");
 
-  log(`Waiting for CI run for commit ${sha.slice(0, 7)}…`);
+  log(`Waiting for CI run for commit ${sha.slice(0, 7)} (${env} deploy)…`);
 
   const deadline = Date.now() + 20 * 60 * 1000; // 20-min ceiling for Docker builds
   let runId: string | undefined;
@@ -329,9 +330,14 @@ export async function cmdCi(): Promise<void> {
  * the GitHub Actions build + rollout. This is the single verb agents should
  * run to deploy — no multi-step ritual to remember or skip.
  */
+function normalizeEnv(value: string | undefined): "test" | "prod" {
+  return value === "prod" ? "prod" : "test";
+}
+
 export async function cmdShip(opts: { message?: string } = {}): Promise<void> {
   const dir = cwd();
   const manifest = await loadManifest(dir);
+  const env = "test";
 
   if (!(await hasCredentials())) {
     throw new Error(
@@ -356,7 +362,7 @@ export async function cmdShip(opts: { message?: string } = {}): Promise<void> {
     log("No changes since the last ship; pushing anyway to ensure it's deployed.");
   }
   const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir)).out || "main";
-  log(`Pushing to origin/${branch}…`);
+  log(`Pushing to origin/${branch} for ${env} deploy…`);
   const push = await git(["push", "origin", branch], dir);
   if (!push.ok) {
     log("\n⚠ Push failed:");
@@ -366,8 +372,8 @@ export async function cmdShip(opts: { message?: string } = {}): Promise<void> {
     return;
   }
   log(
-    "\n✓ Pushed. GitHub Actions is building and rolling out the new version." +
-      "\nRun `vibe ci` to monitor the build and get logs if it fails."
+    `\n✓ Pushed. GitHub Actions is building and rolling out to ${env}.` +
+      `\nRun \`vibe ci --env ${env}\` to monitor the build and get logs if it fails.`
   );
 }
 
@@ -469,24 +475,25 @@ export async function cmdDoctor(): Promise<void> {
 
 const TERMINAL = new Set(["live", "failed"]);
 
-export async function cmdDeploy(opts: { image?: string } = {}): Promise<void> {
+export async function cmdDeploy(opts: { image?: string; env?: string } = {}): Promise<void> {
   const dir = cwd();
   const manifest = await loadManifest(dir);
+  const env = normalizeEnv(opts.env);
 
   log(`Registering ${manifest.name}…`);
   await api.registerApp(manifest);
 
   let deploymentId: string;
   if (opts.image) {
-    log(`Deploying prebuilt image ${opts.image}…`);
-    ({ deploymentId } = await api.deployImage(manifest.id, { image: opts.image }));
+    log(`Deploying prebuilt image ${opts.image} to ${env}…`);
+    ({ deploymentId } = await api.deployImage(manifest.id, { image: opts.image, env }));
   } else {
     log("Packaging build context…");
     const tarGz = await packProject(dir);
     log(`  context: ${(tarGz.length / 1024 / 1024).toFixed(1)} MB`);
-    ({ deploymentId } = await api.deploy(manifest.id, tarGz));
+    ({ deploymentId } = await api.deploy(manifest.id, tarGz, env));
   }
-  log(`Deploying (${deploymentId})…`);
+  log(`Deploying to ${env} (${deploymentId})…`);
 
   let last = "";
   for (;;) {
@@ -508,17 +515,51 @@ export async function cmdDeploy(opts: { image?: string } = {}): Promise<void> {
     }
   }
 
-  const { status } = await api.getStatus(manifest.id);
+  const { status } = await api.getStatus(manifest.id, env);
   log(`\n✓ Built and deployed.\n\nURL:\n${status.app.url}\n`);
+}
+
+export async function cmdTest(opts: { image?: string } = {}): Promise<void> {
+  await cmdDeploy({ image: opts.image, env: "test" });
+}
+
+export async function cmdPromote(opts: { from?: string; to?: string } = {}): Promise<void> {
+  const manifest = await loadManifest(cwd());
+  const from = normalizeEnv(opts.from);
+  const to = opts.to === "test" ? "test" : "prod";
+  const { deploymentId } = await api.promote(manifest.id, from, to);
+  log(`Promoting ${manifest.id} from ${from} to ${to} (${deploymentId})…`);
+  let last = "";
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const { deployment, buildLog } = await api.getDeployment(deploymentId);
+    if (deployment.status !== last) {
+      log(`  → ${deployment.status}`);
+      last = deployment.status;
+    }
+    if (TERMINAL.has(deployment.status)) {
+      if (deployment.status === "failed") {
+        log(`\n✗ Promote failed: ${deployment.error ?? "unknown"}`);
+        log("\n--- build log (tail) ---");
+        log(buildLog.split("\n").slice(-25).join("\n"));
+        process.exitCode = 1;
+        return;
+      }
+      break;
+    }
+  }
+  const { status } = await api.getStatus(manifest.id, to);
+  log(`\n✓ Promoted to ${to}.\n\nURL:\n${status.app.url}\n`);
 }
 
 /* ------------------------------- status ------------------------------- */
 
-export async function cmdStatus(json: boolean): Promise<void> {
+export async function cmdStatus(json: boolean, env = "prod"): Promise<void> {
   const m = await loadManifest(cwd());
-  const { status } = await api.getStatus(m.id);
+  const targetEnv = normalizeEnv(env);
+  const { status } = await api.getStatus(m.id, targetEnv);
   if (json) return log(JSON.stringify(status, null, 2));
-  log(`App: ${status.app.name} (${status.app.id})`);
+  log(`App: ${status.app.name} (${status.app.id}) [${targetEnv}]`);
   log(`Status: ${status.app.status}    Health: ${status.app.health}`);
   log(`URL: ${status.app.url ?? "(not deployed)"}`);
   log(`Runtime: ${status.manifestSummary.runtimeAdapter} :${status.manifestSummary.port}`);
@@ -538,9 +579,9 @@ export async function cmdStatus(json: boolean): Promise<void> {
 
 /* -------------------------------- logs -------------------------------- */
 
-export async function cmdLogs(build: boolean): Promise<void> {
+export async function cmdLogs(build: boolean, env = "prod"): Promise<void> {
   const m = await loadManifest(cwd());
-  const { log: out } = await api.logs(m.id, build);
+  const { log: out } = await api.logs(m.id, build, 200, normalizeEnv(env));
   log(out || "(no logs)");
 }
 
@@ -584,6 +625,8 @@ const RULES = [
   "Read the signed-in user from X-Vibe-User-Email / X-Vibe-User-Role headers.",
   "Read config from env vars (DATABASE_URL, S3_*). Never hardcode secrets.",
   "Do not edit proxy/Caddy config; use the vibe CLI for infrastructure.",
+  "Use `vibe test` and `vibe ci --env test` for feature verification; do not test against production.",
+  "Promote to production with `vibe promote` only after test passes and the user approves.",
   "Update .vibe-memory after meaningful changes.",
 ];
 
@@ -711,9 +754,9 @@ export async function cmdApps(): Promise<void> {
 
 /* -------------------------------- open -------------------------------- */
 
-export async function cmdOpen(): Promise<void> {
+export async function cmdOpen(env = "prod"): Promise<void> {
   const m = await loadManifest(cwd());
-  const { status } = await api.getStatus(m.id);
+  const { status } = await api.getStatus(m.id, normalizeEnv(env));
   if (!status.app.url) return log("App is not deployed yet.");
   const url = status.app.url;
   const cmd =
@@ -724,10 +767,11 @@ export async function cmdOpen(): Promise<void> {
 
 /* ------------------------------ rollback ------------------------------ */
 
-export async function cmdRollback(): Promise<void> {
+export async function cmdRollback(env = "prod"): Promise<void> {
   const m = await loadManifest(cwd());
-  const res = await api.rollback(m.id);
-  log(`Rolled back to ${res.rolledBackTo}`);
+  const targetEnv = normalizeEnv(env);
+  const res = await api.rollback(m.id, targetEnv);
+  log(`Rolled back ${targetEnv} to ${res.rolledBackTo}`);
 }
 
 /* -------------------------------- delete ------------------------------ */

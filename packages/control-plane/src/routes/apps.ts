@@ -82,7 +82,7 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
     const actor = await requireUser(req, reply);
     if (!actor) return;
     const rows = await listApps();
-    const apps = await Promise.all(rows.map(appSummary));
+    const apps = await Promise.all(rows.map((row) => appSummary(row)));
     return reply.send({ apps });
   });
 

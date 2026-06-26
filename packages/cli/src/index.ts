@@ -20,8 +20,10 @@ import {
   cmdOpen,
   cmdPlatform,
   cmdPlatformApp,
+  cmdPromote,
   cmdQuery,
   cmdShip,
+  cmdTest,
   cmdRollback,
   cmdStatus,
   handleError,
@@ -64,32 +66,49 @@ program.command("doctor").description("Check the project for problems").action(w
 
 program
   .command("ship")
-  .description("Deploy: connect to GitHub on first run, then commit + push (one command)")
+  .description("Deploy to the test environment via GitHub, then promote when ready")
   .option("-m, --message <message>", "commit message")
   .action(wrap((opts: { message?: string }) => cmdShip(opts)));
 
 program
+  .command("test")
+  .description("Build and deploy the app to the isolated test environment")
+  .option("--image <ref>", "deploy a prebuilt image instead of building")
+  .action(wrap((opts: { image?: string }) => cmdTest(opts)));
+
+program
+  .command("promote")
+  .description("Promote the current test deployment into production")
+  .option("--from <env>", "source environment", "test")
+  .option("--to <env>", "target environment", "prod")
+  .action(wrap((opts: { from?: string; to?: string }) => cmdPromote(opts)));
+
+program
   .command("ci")
   .description("Wait for the GitHub Actions build to finish; print logs on failure")
-  .action(wrap(cmdCi));
+  .option("--env <env>", "target environment: test | prod", "test")
+  .action(wrap((opts: { env?: string }) => cmdCi(opts)));
 
 program
   .command("deploy")
   .description("Build and deploy the app (or --image to deploy a prebuilt image)")
   .option("--image <ref>", "deploy a prebuilt image instead of building")
-  .action(wrap((opts: { image?: string }) => cmdDeploy(opts)));
+  .option("--env <env>", "target environment: test | prod", "test")
+  .action(wrap((opts: { image?: string; env?: string }) => cmdDeploy(opts)));
 
 program
   .command("status")
   .description("Show live app status")
   .option("--json", "output JSON")
-  .action(wrap((opts: { json?: boolean }) => cmdStatus(!!opts.json)));
+  .option("--env <env>", "target environment: test | prod", "prod")
+  .action(wrap((opts: { json?: boolean; env?: string }) => cmdStatus(!!opts.json, opts.env)));
 
 program
   .command("logs")
   .description("Show app logs")
   .option("--build", "show the build log instead of runtime logs")
-  .action(wrap((opts: { build?: boolean }) => cmdLogs(!!opts.build)));
+  .option("--env <env>", "target environment: test | prod", "prod")
+  .action(wrap((opts: { build?: boolean; env?: string }) => cmdLogs(!!opts.build, opts.env)));
 
 program
   .command("context")
@@ -110,13 +129,16 @@ program
   .action(wrap((opts: { yes?: boolean }) => cmdDelete(opts)));
 
 program.command("apps").description("List all apps").action(wrap(cmdApps));
-program.command("open").description("Open the deployed app in a browser").action(wrap(cmdOpen));
+program.command("open").description("Open the deployed app in a browser")
+  .option("--env <env>", "target environment: test | prod", "prod")
+  .action(wrap((opts: { env?: string }) => cmdOpen(opts.env)));
 
 const deploy = program.commands.find((c) => c.name() === "deploy")!;
 deploy
   .command("rollback")
   .description("Roll back to the previous deployment")
-  .action(wrap(cmdRollback));
+  .option("--env <env>", "target environment: test | prod", "prod")
+  .action(wrap((opts: { env?: string }) => cmdRollback(opts.env)));
 
 const platform = program
   .command("platform")

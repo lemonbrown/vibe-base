@@ -30,9 +30,15 @@ async function appByHost(host: string | undefined): Promise<AppLite | null> {
   const cfg = loadConfig();
   const sub = subdomainOf(host, cfg.appsDomain);
   if (!sub) return null;
-  return one<AppLite>(
+  const exact = await one<AppLite>(
     "SELECT id, subdomain, access_mode, default_role FROM apps WHERE subdomain = $1",
     [sub]
+  );
+  if (exact) return exact;
+  if (!sub.endsWith("-test")) return null;
+  return one<AppLite>(
+    "SELECT id, subdomain, access_mode, default_role FROM apps WHERE subdomain = $1",
+    [sub.slice(0, -"-test".length)]
   );
 }
 

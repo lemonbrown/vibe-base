@@ -1,4 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
+import type { AppEnvironment } from "@vibe/shared";
 import { loadConfig } from "../config.js";
 import { one, query } from "../db.js";
 
@@ -11,6 +12,7 @@ import { one, query } from "../db.js";
 
 interface StorageRow {
   app_id: string;
+  environment: AppEnvironment;
   bucket: string;
   prefix: string;
   access_key: string;
@@ -145,15 +147,19 @@ async function listObjects(bucket: string): Promise<string[]> {
   return keys;
 }
 
-function bucketName(appId: string): string {
-  return `vibe-${appId}`.replace(/[^a-z0-9-]/g, "-").slice(0, 63);
+function bucketName(appId: string, environment: AppEnvironment): string {
+  const suffix = environment === "prod" ? "" : `-${environment}`;
+  return `vibe-${appId}${suffix}`.replace(/[^a-z0-9-]/g, "-").slice(0, 63);
 }
 
 /** Ensure storage is provisioned for the app; idempotent. */
-export async function provisionStorage(appId: string): Promise<StorageRow> {
+export async function provisionStorage(
+  appId: string,
+  environment: AppEnvironment = "prod"
+): Promise<StorageRow> {
   const existing = await one<StorageRow>(
-    "SELECT * FROM storage_provisions WHERE app_id = $1",
-    [appId]
+    "SELECT * FROM storage_provisions WHERE app_id = $1 AND environment = $2",
+    [appId, environment]
   );
   if (existing) {
     await ensureBucket(existing.bucket);
@@ -161,32 +167,34 @@ export async function provisionStorage(appId: string): Promise<StorageRow> {
   }
 
   const cfg = loadConfig().storage;
-  const bucket = bucketName(appId);
+  const bucket = bucketName(appId, environment);
   await ensureBucket(bucket);
 
   const row: StorageRow = {
     app_id: appId,
+    environment,
     bucket,
     prefix: "",
     access_key: cfg.rootUser,
     secret_key: cfg.rootPassword,
   };
   await query(
-    `INSERT INTO storage_provisions (app_id, bucket, prefix, access_key, secret_key)
-     VALUES ($1,$2,$3,$4,$5)
-     ON CONFLICT (app_id) DO NOTHING`,
-    [row.app_id, row.bucket, row.prefix, row.access_key, row.secret_key]
+    `INSERT INTO storage_provisions (app_id, environment, bucket, prefix, access_key, secret_key)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (app_id, environment) DO NOTHING`,
+    [row.app_id, row.environment, row.bucket, row.prefix, row.access_key, row.secret_key]
   );
   return row;
 }
 
 /** S3 env vars injected into the app container. */
 export async function storageEnvFor(
-  appId: string
+  appId: string,
+  environment: AppEnvironment = "prod"
 ): Promise<Record<string, string> | null> {
   const row = await one<StorageRow>(
-    "SELECT * FROM storage_provisions WHERE app_id = $1",
-    [appId]
+    "SELECT * FROM storage_provisions WHERE app_id = $1 AND environment = $2",
+    [appId, environment]
   );
   if (!row) return null;
   const cfg = loadConfig().storage;
@@ -201,9 +209,13 @@ export async function storageEnvFor(
   };
 }
 
-export async function isStorageProvisioned(appId: string): Promise<boolean> {
-  const res = await query("SELECT 1 FROM storage_provisions WHERE app_id = $1", [
+export async function isStorageProvisioned(
+  appId: string,
+  environment: AppEnvironment = "prod"
+): Promise<boolean> {
+  const res = await query("SELECT 1 FROM storage_provisions WHERE app_id = $1 AND environment = $2", [
     appId,
+    environment,
   ]);
   return !!res.rowCount;
 }
@@ -214,10 +226,15 @@ export async function isStorageProvisioned(appId: string): Promise<boolean> {
  * that has already been removed. S3 refuses to delete a non-empty bucket, so
  * every object is removed first.
  */
-export async function deprovisionStorage(appId: string): Promise<void> {
+export async function deprovisionStorage(
+  appId: string,
+  environment?: AppEnvironment
+): Promise<void> {
   const row = await one<StorageRow>(
-    "SELECT * FROM storage_provisions WHERE app_id = $1",
-    [appId]
+    `SELECT * FROM storage_provisions WHERE app_id = $1
+     ${environment ? "AND environment = $2" : ""}
+     LIMIT 1`,
+    environment ? [appId, environment] : [appId]
   );
   if (!row) return;
 
@@ -233,5 +250,5 @@ export async function deprovisionStorage(appId: string): Promise<void> {
     throw new Error(`delete bucket failed (${del.status}): ${await del.text()}`);
   }
 
-  await query("DELETE FROM storage_provisions WHERE app_id = $1", [appId]);
+  await query("DELETE FROM storage_provisions WHERE app_id = $1 AND environment = $2", [appId, row.environment]);
 }

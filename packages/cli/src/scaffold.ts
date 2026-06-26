@@ -121,6 +121,12 @@ LLM generation (when \`capabilities.llm: true\` in vibe.app.yaml):
   inference cost and needs no model selection logic.
 
 Deploying (GitHub is the default path):
+- Use \`vibe test\` for feature verification. It deploys to an isolated test
+  environment with its own URL, database, and storage.
+- Do not use production for feature testing. Production changes happen through
+  \`vibe promote\` after test passes and the user approves.
+- \`vibe ship\` is GitHub-backed test deployment; after it runs, monitor with
+  \`vibe ci --env test\`.
 - **Credentials:** if any \`vibe\` command reports you are not logged in, stop and
   ask the user for their control-plane URL and owner token, then run
   \`vibe login --url <url> --token <token>\`. Never invent credentials. Pushing to
@@ -258,8 +264,14 @@ const EMAIL_HELPER_JS = `// Vibe Base email helper — send via the platform-con
 async function sendEmail({ to, subject, text, html }) {
   const provider = process.env.EMAIL_PROVIDER;
   const from = process.env.EMAIL_FROM;
-  if (!provider) throw new Error('Email is not configured (no EMAIL_PROVIDER).');
   if (!to) throw new Error('sendEmail: "to" is required.');
+
+  if (process.env.EMAIL_CAPTURE === 'true' || process.env.VIBE_ENV === 'test') {
+    console.log('[email:capture]', JSON.stringify({ to, subject, text, html }));
+    return { id: 'captured-' + Date.now() };
+  }
+
+  if (!provider) throw new Error('Email is not configured (no EMAIL_PROVIDER).');
 
   if (provider === 'resend') {
     const { Resend } = require('resend');
@@ -397,13 +409,14 @@ jobs:
         env:
           VIBE_API_URL: \${{ vars.VIBE_API_URL }}
           VIBE_APP_ID: \${{ vars.VIBE_APP_ID }}
+          VIBE_DEPLOY_ENV: \${{ vars.VIBE_DEPLOY_ENV || 'test' }}
           VIBE_DEPLOY_TOKEN: \${{ secrets.VIBE_DEPLOY_TOKEN }}
           IMAGE: \${{ steps.img.outputs.image }}:\${{ github.sha }}
         run: |
           curl -fsS -X POST "$VIBE_API_URL/api/apps/$VIBE_APP_ID/deploy/image" \\
             -H "authorization: Bearer $VIBE_DEPLOY_TOKEN" \\
             -H "content-type: application/json" \\
-            -d "{\\"image\\":\\"$IMAGE\\",\\"sha\\":\\"\${{ github.sha }}\\",\\"ref\\":\\"\${{ github.ref }}\\"}"
+            -d "{\\"image\\":\\"$IMAGE\\",\\"sha\\":\\"\${{ github.sha }}\\",\\"ref\\":\\"\${{ github.ref }}\\",\\"env\\":\\"$VIBE_DEPLOY_ENV\\"}"
 `;
 
 /**
@@ -435,7 +448,7 @@ export async function scaffoldGithub(
 }
 
 function envExample(m: Manifest): string {
-  const lines = ["# Platform-provided (do not set manually):", "# PORT", "# VIBE_APP_ID"];
+  const lines = ["# Platform-provided (do not set manually):", "# PORT", "# VIBE_APP_ID", "# VIBE_ENV"];
   if (m.capabilities.database) lines.push("# DATABASE_URL");
   if (m.capabilities.storage)
     lines.push("# S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY");
@@ -443,6 +456,7 @@ function envExample(m: Manifest): string {
     lines.push(
       "# EMAIL_PROVIDER, EMAIL_FROM (+ GMAIL_* for gmail-api, or SMTP_* for smtp)"
     );
+  if (m.capabilities.email) lines.push("# EMAIL_CAPTURE (true in test deployments)");
   if (m.capabilities.llm)
     lines.push("# VIBE_CONTROL_URL", "# VIBE_OWNER_TOKEN");
   lines.push("", "# Your app's own variables go below (set with `vibe env set`):");

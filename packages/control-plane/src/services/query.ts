@@ -128,7 +128,7 @@ export async function appDetail(
     "SELECT email, role, status FROM app_members WHERE app_id = $1 ORDER BY role, email",
     [appId]
   );
-  const deps = await recentDeployments(appId, 5);
+  const deps = await recentDeployments(appId, "prod", 5);
   const repo = await getAppRepo(appId);
 
   return {

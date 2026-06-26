@@ -1,3 +1,4 @@
+import type { AppEnvironment } from "@vibe/shared";
 import { loadConfig } from "../config.js";
 
 /**
@@ -8,7 +9,8 @@ import { loadConfig } from "../config.js";
  *   3. on non-2xx (e.g. 302 to login), returns the auth response to the client
  */
 
-const ROUTE_ID = (appId: string) => `app-${appId}`;
+const ROUTE_ID = (appId: string, environment: AppEnvironment = "prod") =>
+  environment === "prod" ? `app-${appId}` : `app-${appId}-${environment}`;
 
 async function admin(
   method: string,
@@ -44,11 +46,17 @@ function controlPlaneRoute(): unknown {
   };
 }
 
-function appRoute(subdomain: string, container: string, port: number, appId: string): unknown {
+function appRoute(
+  subdomain: string,
+  container: string,
+  port: number,
+  appId: string,
+  environment: AppEnvironment = "prod"
+): unknown {
   const cfg = loadConfig();
   const host = `${subdomain}.${cfg.appsDomain}`;
   return {
-    "@id": ROUTE_ID(appId),
+    "@id": ROUTE_ID(appId, environment),
     match: [{ host: [host] }],
     handle: [
       {
@@ -159,12 +167,13 @@ export async function upsertAppRoute(
   appId: string,
   subdomain: string,
   container: string,
-  port: number
+  port: number,
+  environment: AppEnvironment = "prod"
 ): Promise<void> {
-  const route = appRoute(subdomain, container, port, appId);
-  const existing = await admin("GET", `/id/${ROUTE_ID(appId)}`);
+  const route = appRoute(subdomain, container, port, appId, environment);
+  const existing = await admin("GET", `/id/${ROUTE_ID(appId, environment)}`);
   if (existing.ok) {
-    const res = await admin("PATCH", `/id/${ROUTE_ID(appId)}`, route);
+    const res = await admin("PATCH", `/id/${ROUTE_ID(appId, environment)}`, route);
     if (!res.ok) throw new Error(`caddy route update failed: ${await res.text()}`);
   } else {
     const res = await admin(
@@ -176,6 +185,9 @@ export async function upsertAppRoute(
   }
 }
 
-export async function removeAppRoute(appId: string): Promise<void> {
-  await admin("DELETE", `/id/${ROUTE_ID(appId)}`);
+export async function removeAppRoute(
+  appId: string,
+  environment: AppEnvironment = "prod"
+): Promise<void> {
+  await admin("DELETE", `/id/${ROUTE_ID(appId, environment)}`);
 }
