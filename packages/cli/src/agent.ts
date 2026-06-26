@@ -761,6 +761,21 @@ async function runJob(job: AgentJob, cfg: AgentConfig): Promise<void> {
       job.llmProvider === "codex"
         ? await runCodex(job, plan, prompt, enqueue)
         : await runClaude(job, plan, prompt, enqueue);
+
+    // Claude CLI returns "[Request interrupted by user]" when asked to resume
+    // a session that was previously cut off by SIGTERM/SIGINT. Retry once
+    // without --resume so the user's message actually gets answered.
+    if (
+      job.llmProvider !== "codex" &&
+      job.llmSessionId &&
+      !result.cancelled &&
+      result.finalText.includes("[Request interrupted by user]")
+    ) {
+      log("  ! interrupted session detected — retrying without --resume");
+      const freshJob = { ...job, llmSessionId: null };
+      queue = [];
+      result = await runClaude(freshJob, plan, prompt, enqueue);
+    }
   } catch (err) {
     result = { finalText: (err as Error).message, failed: true };
   } finally {

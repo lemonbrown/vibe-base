@@ -227,13 +227,19 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
         await query("UPDATE messages SET status = $2 WHERE id = $1", [job.message_id, msgStatus]);
       }
     }
+    // Only persist the session ID on clean completion — a stopped or failed
+    // session leaves Claude in an interrupted state and resuming it on the
+    // next message would immediately return "[Request interrupted by user]".
     const sessionId = req.body?.llmSessionId ?? req.body?.claudeSessionId;
-    if (sessionId && job.conv_id) {
+    if (sessionId && job.conv_id && status === "done") {
       await query("UPDATE conversations SET claude_session_id = $2, llm_provider = $3, updated_at = now() WHERE id = $1", [
         job.conv_id,
         sessionId,
         toProvider(req.body?.llmProvider ?? "claude"),
       ]);
+    } else if (status !== "done" && job.conv_id) {
+      // Clear any existing interrupted session so the next job starts fresh.
+      await query("UPDATE conversations SET claude_session_id = NULL WHERE id = $1", [job.conv_id]);
     }
     // A terminal event so SSE listeners know to close.
     const seqRow = await one<{ next: number }>(
