@@ -540,7 +540,9 @@ async function runCodex(
 
   args.push("--json", "--skip-git-repo-check", "-o", outFile);
   if (job.llmModel.trim()) args.push("--model", job.llmModel.trim());
-  if (job.llmReasoningEffort) args.push("--reasoning-effort", job.llmReasoningEffort);
+  if (job.llmReasoningEffort) {
+    args.push("-c", `model_reasoning_effort=${JSON.stringify(job.llmReasoningEffort)}`);
+  }
   if (job.kind !== "ask" && job.kind !== "generate" && !job.planMode) {
     args.push("--dangerously-bypass-approvals-and-sandbox");
   } else if (!job.llmSessionId) {
