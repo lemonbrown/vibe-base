@@ -626,7 +626,7 @@ const RULES = [
   "Read config from env vars (DATABASE_URL, S3_*). Never hardcode secrets.",
   "Do not edit proxy/Caddy config; use the vibe CLI for infrastructure.",
   "Use `vibe test` and `vibe ci --env test` for feature verification; do not test against production.",
-  "Promote to production with `vibe promote` only after test passes and the user approves.",
+  "After test deployment and verification pass, promote to production with `vibe promote`.",
   "Update .vibe-memory after meaningful changes.",
 ];
 

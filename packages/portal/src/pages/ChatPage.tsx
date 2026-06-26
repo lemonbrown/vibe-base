@@ -22,7 +22,6 @@ interface Live {
   asstId: string;
   text: string;
   thinking: string;
-  tools: string[];
   statusText: string;
   error?: string;
   active: boolean;
@@ -35,25 +34,15 @@ function formatElapsed(sec: number): string {
   return `${Math.floor(sec / 60)}m ${sec % 60}s`;
 }
 
-function ToolChip({ name }: { name: string }) {
-  return (
-    <span className="pill mr-1.5 mb-1 bg-[var(--color-surface-2)] text-[var(--color-muted)]">
-      <span aria-hidden>⚙</span> {name}
-    </span>
-  );
-}
-
 function Bubble({
   role,
   children,
   status,
-  tools,
   streaming,
 }: {
   role: "user" | "assistant";
   children: React.ReactNode;
   status?: ChatMessage["status"];
-  tools?: string[];
   streaming?: boolean;
 }) {
   const isUser = role === "user";
@@ -76,13 +65,6 @@ function Bubble({
             </span>
           )}
         </div>
-        {tools && tools.length > 0 && (
-          <div className="mb-1.5 flex flex-wrap">
-            {tools.map((t, i) => (
-              <ToolChip key={i} name={t} />
-            ))}
-          </div>
-        )}
         <div className="break-words text-sm leading-relaxed">
           {children}
           {streaming && <Caret />}
@@ -155,7 +137,7 @@ export function ChatPage() {
   const startStream = (asstId: string) => {
     disposeRef.current?.();
     setElapsed(0);
-    setLive({ asstId, text: "", thinking: "", tools: [], statusText: "", active: true, startedAt: Date.now() });
+    setLive({ asstId, text: "", thinking: "", statusText: "", active: true, startedAt: Date.now() });
     disposeRef.current = streamJob(id, 0, {
       onEvent: (e) =>
         setLive((cur) => {
@@ -165,7 +147,7 @@ export function ChatPage() {
           if (e.type === "thinking")
             return { ...cur, thinking: cur.thinking + (typeof e.data.text === "string" ? e.data.text : "") };
           if (e.type === "tool")
-            return { ...cur, tools: [...cur.tools, String(e.data.name ?? "tool")] };
+            return cur;
           if (e.type === "error")
             return { ...cur, error: String(e.data.error ?? "error") };
           if (e.type === "status") {
@@ -258,7 +240,7 @@ export function ChatPage() {
   // Auto-scroll to the newest content as it streams in.
   useLayoutEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [thread.length, live?.text, live?.thinking, live?.tools.length]);
+  }, [thread.length, live?.text, live?.thinking]);
 
   if (isLoading) return <LoadingBlock label="Loading conversation…" />;
   if (!conv)
@@ -302,7 +284,7 @@ export function ChatPage() {
           if (m.role === "assistant" && isLive) {
             return (
               <div key={m.id}>
-                <Bubble role="assistant" tools={live!.tools} streaming={live!.active && !!live!.text} status={m.status}>
+                <Bubble role="assistant" streaming={live!.active && !!live!.text} status={m.status}>
                   {(live!.thinking || (live!.active && !live!.text)) && (
                     <ThinkingBlock text={live!.thinking} active={live!.active} elapsed={elapsed} />
                   )}

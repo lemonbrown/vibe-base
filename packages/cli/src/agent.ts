@@ -243,7 +243,7 @@ function buildPreamble(appId: string): string {
     `and set testDir to "tests". ` +
     `Once the app builds, run \`vibe test\` to deploy to the isolated test environment. If using the GitHub-backed path, run \`vibe ship\` and then \`vibe ci --env test\` ` +
     `to monitor the GitHub Actions build. If deployment or CI fails, read the log output it prints, fix ` +
-    `the issue, and run \`vibe test\` again. Do not deploy or promote to production unless the user explicitly asks. Use the \`vibe\` CLI for all infrastructure ` +
+    `the issue, and run \`vibe test\` again. After test deployment and verification pass, run \`vibe promote\` to roll the tested image to production. Use the \`vibe\` CLI for all infrastructure ` +
     `and keep .vibe-memory/ up to date.\n\n` +
     `If the app needs to generate text or content with an LLM, set \`capabilities.llm: true\` ` +
     `in vibe.app.yaml and call \`POST $VIBE_CONTROL_URL/api/apps/$VIBE_APP_ID/llm\` from the ` +
@@ -256,7 +256,7 @@ const ADJUST_PREAMBLE =
   "You are updating an existing Vibe Base app. Follow AGENTS.md in this directory. " +
   "Use the `vibe` CLI for infrastructure and run `vibe test` to deploy changes to the isolated test environment. " +
   "If using the GitHub-backed path, run `vibe ship` and then `vibe ci --env test` to monitor the GitHub Actions build. If deployment or CI fails, read the log " +
-  "output, fix the issue, and run `vibe test` again. Do not deploy or promote to production unless the user explicitly asks. " +
+  "output, fix the issue, and run `vibe test` again. After test deployment and verification pass, run `vibe promote` to roll the tested image to production. " +
   "Keep readModels in vibe.app.yaml current and .vibe-memory/ up to date.\n\n" +
   "If the app needs to generate text or content with an LLM, set `capabilities.llm: true` " +
   "in vibe.app.yaml and call `POST $VIBE_CONTROL_URL/api/apps/$VIBE_APP_ID/llm` from the " +
@@ -269,7 +269,7 @@ const CHAT_PREAMBLE =
   "`vibe platform app <id>` for details on one app, and `vibe query <model> --app <id>` to read data. " +
   "Determine from the user's message whether to answer a question, build a new app (`vibe init`), " +
   "or modify an existing one. For code changes, make edits, run `vibe test` to deploy to the isolated test environment. If using GitHub-backed deployment, run `vibe ship` and then `vibe ci --env test` " +
-  "to monitor the GitHub Actions build. Fix and re-test if deployment or CI fails. Promote to production only when explicitly asked. " +
+  "to monitor the GitHub Actions build. Fix and re-test if deployment or CI fails. After test deployment and verification pass, run `vibe promote` to roll the tested image to production. " +
   "Follow AGENTS.md if present and keep .vibe-memory/ up to date in any app you touch.\n\n" +
   "IMPORTANT: Tool outputs and thinking are NOT visible to the user — only your text responses are. " +
   "You MUST always end with a clear text response that directly answers the user's question or " +
@@ -634,6 +634,7 @@ async function runCodex(
 interface VerifyInstruction {
   appUrl: string;
   ownerEmail: string;
+  environment?: "test" | "prod";
 }
 
 async function runPlaywrightTests(
@@ -676,6 +677,18 @@ async function captureScreenshot(url: string, viewportSize: string, outPath: str
   });
 }
 
+async function waitForDeployment(deploymentId: string): Promise<{ ok: boolean; error?: string }> {
+  const terminal = new Set(["live", "failed"]);
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const { deployment, buildLog } = await api.getDeployment(deploymentId);
+    if (!terminal.has(deployment.status)) continue;
+    if (deployment.status === "live") return { ok: true };
+    const tail = buildLog.split("\n").slice(-25).join("\n");
+    return { ok: false, error: deployment.error ?? (tail || "deployment failed") };
+  }
+}
+
 async function runVerifyJob(job: AgentJob, cfg: AgentConfig): Promise<void> {
   let parsed: VerifyInstruction;
   try {
@@ -709,6 +722,20 @@ async function runVerifyJob(job: AgentJob, cfg: AgentConfig): Promise<void> {
   }
 
   try {
+    if (testResult.passed && parsed.environment === "test" && job.targetApp) {
+      log(`  -> promote ${job.targetApp} test -> prod`);
+      const { deploymentId } = await api.promote(job.targetApp, "test", "prod");
+      const promoted = await waitForDeployment(deploymentId);
+      if (!promoted.ok) {
+        await api.completeJob(job.id, {
+          status: "failed",
+          error: `Tests passed, but production promotion failed: ${promoted.error ?? "unknown error"}`,
+        });
+        return;
+      }
+      log(`  ok promoted to prod (${deploymentId})`);
+    }
+
     const result = await api.completeVerifyJob(job.id, {
       passed: testResult.passed,
       testOutput: testResult.output,

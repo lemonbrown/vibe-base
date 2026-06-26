@@ -308,7 +308,7 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
       .join("\n");
 
     const instruction = [
-      `Playwright tests failed after deploying "${job.target_app}". Fix the issues and redeploy with \`vibe ship\`.`,
+      `Playwright tests failed after deploying "${job.target_app}". Fix the issues, redeploy to test with \`vibe test\` or \`vibe ship\`, and promote with \`vibe promote\` after tests pass.`,
       "",
       "Test output:",
       testOutput,

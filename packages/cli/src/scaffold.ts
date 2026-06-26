@@ -123,8 +123,8 @@ LLM generation (when \`capabilities.llm: true\` in vibe.app.yaml):
 Deploying (GitHub is the default path):
 - Use \`vibe test\` for feature verification. It deploys to an isolated test
   environment with its own URL, database, and storage.
-- Do not use production for feature testing. Production changes happen through
-  \`vibe promote\` after test passes and the user approves.
+- Do not use production for feature testing. After test deployment and
+  verification pass, run \`vibe promote\` to roll the tested image to production.
 - \`vibe ship\` is GitHub-backed test deployment; after it runs, monitor with
   \`vibe ci --env test\`.
 - **Credentials:** if any \`vibe\` command reports you are not logged in, stop and
