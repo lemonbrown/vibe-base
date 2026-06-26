@@ -429,9 +429,11 @@ async function runClaude(
   prompt: string,
   enqueue: Enqueue
 ): Promise<RunnerResult> {
+  // Pipe the prompt via stdin (-p with no value = print/non-interactive mode,
+  // prompt is read from stdin). This avoids Windows cmd.exe argument-escaping
+  // issues with long prompts containing quotes, backticks, and newlines.
   const args = [
     "-p",
-    prompt,
     "--output-format",
     "stream-json",
     "--verbose",
@@ -445,13 +447,17 @@ async function runClaude(
   if (job.stackPolicy && job.stackPolicy.trim()) args.push("--append-system-prompt", job.stackPolicy);
   if (job.llmSessionId) args.push("--resume", job.llmSessionId);
 
+  log(`  claude args: ${args.join(" ")}`);
+
   let sessionId: string | undefined = job.llmSessionId ?? undefined;
   let finalText = "";
   let failed = false;
   let cancelled = false;
+  let stdoutLines = 0;
 
   await new Promise<void>((resolveRun) => {
     const child = spawnCli("claude", args, { cwd: plan.cwd });
+    child.stdin.end(prompt, "utf8");
 
     const stopWatcher = watchForCancellation(job.id, () => {
       cancelled = true;
@@ -461,6 +467,8 @@ async function runClaude(
 
     const rl = createInterface({ input: child.stdout });
     rl.on("line", (line) => {
+      if (stdoutLines < 5) log(`  stdout[${stdoutLines}]: ${line.slice(0, 120)}`);
+      stdoutLines++;
       const parsed = parseStreamLine(line);
       if (!parsed) return;
       if (parsed.sessionId) sessionId = parsed.sessionId;
@@ -488,6 +496,7 @@ async function runClaude(
 
     child.on("close", (code) => {
       stopWatcher();
+      log(`  claude exited: code=${code} stdout_lines=${stdoutLines} stderr=${JSON.stringify(stderr.trim().slice(0, 200))}`);
       if (cancelled) {
         resolveRun();
         return;
@@ -746,8 +755,10 @@ async function runJob(job: AgentJob, cfg: AgentConfig): Promise<void> {
       /* best-effort; the next flush or completion carries on */
     }
   };
+  const eventCounts: Record<string, number> = {};
   const enqueue = (events: JobEvent[]): void => {
     if (!events.length) return;
+    for (const e of events) eventCounts[e.type] = (eventCounts[e.type] ?? 0) + 1;
     queue.push(...events);
     if (queue.length >= 2) flushing = flushing.then(flush);
   };
@@ -790,6 +801,8 @@ async function runJob(job: AgentJob, cfg: AgentConfig): Promise<void> {
   await flushing;
   await flush();
   const completionStatus = result.cancelled ? "stopped" : result.failed ? "failed" : "done";
+  log(`  events: ${JSON.stringify(eventCounts)}`);
+  log(`  finalText (${result.finalText.length} chars): ${JSON.stringify(result.finalText.slice(0, 120))}`);
   await api.completeJob(job.id, {
     status: completionStatus,
     error: result.cancelled ? "Stopped." : result.failed ? result.finalText.slice(0, 2000) : undefined,
