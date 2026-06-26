@@ -21,6 +21,7 @@ import {
   cmdPlatform,
   cmdPlatformApp,
   cmdPromote,
+  cmdPwaEnable,
   cmdQuery,
   cmdShip,
   cmdTest,
@@ -63,6 +64,12 @@ program
 
 program.command("detect").description("Show detected runtime").action(wrap(cmdDetect));
 program.command("doctor").description("Check the project for problems").action(wrap(cmdDoctor));
+
+const pwa = program.command("pwa").description("Progressive Web App helpers for this app");
+pwa
+  .command("enable")
+  .description("Add app-owned PWA manifest, icons, and static-only service worker")
+  .action(wrap(cmdPwaEnable));
 
 program
   .command("ship")

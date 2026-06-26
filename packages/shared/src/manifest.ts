@@ -55,6 +55,20 @@ export const EmailSchema = z.object({
   provider: z.string().default("platform"),
 });
 
+export const PwaSchema = z.object({
+  enabled: z.boolean().default(false),
+  name: z.string().optional(),
+  shortName: z.string().optional(),
+  themeColor: z.string().default("#0b0d12"),
+  backgroundColor: z.string().default("#0b0d12"),
+  display: z.enum(["standalone", "fullscreen", "minimal-ui", "browser"]).default("standalone"),
+  cache: z
+    .object({
+      strategy: z.enum(["static-only"]).default("static-only"),
+    })
+    .default({}),
+});
+
 export const DomainSchema = z.object({
   /** Subdomain under the platform wildcard, e.g. "bible-study-app". */
   subdomain: z.string(),
@@ -115,6 +129,7 @@ export const ManifestSchema = z.object({
   database: DatabaseSchema.optional(),
   storage: StorageSchema.optional(),
   email: EmailSchema.optional(),
+  pwa: PwaSchema.optional(),
   domain: DomainSchema,
   roles: z.array(z.string()).default(["owner", "member"]),
   /** How the platform/LLM may query this app's live data (see ReadModelSchema). */
@@ -125,6 +140,7 @@ export type Manifest = z.infer<typeof ManifestSchema>;
 export type Runtime = z.infer<typeof RuntimeSchema>;
 export type Capabilities = z.infer<typeof CapabilitiesSchema>;
 export type AccessMode = z.infer<typeof AccessModeSchema>;
+export type Pwa = z.infer<typeof PwaSchema>;
 
 /** Parse + apply defaults. Throws a ZodError with readable issues on failure. */
 export function parseManifest(input: unknown): Manifest {

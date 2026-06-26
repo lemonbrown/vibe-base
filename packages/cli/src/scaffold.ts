@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { generateDockerfile, type Manifest } from "@vibe/shared";
 
@@ -249,6 +249,11 @@ export interface ScaffoldResult {
   created: string[];
 }
 
+export interface PwaScaffoldResult extends ScaffoldResult {
+  registered: boolean;
+  notes: string[];
+}
+
 /**
  * Ready-made email helper scaffolded for Node apps with capabilities.email.
  * Handles all three platform providers and — importantly — checks Resend's
@@ -445,6 +450,181 @@ export async function scaffoldGithub(
     }
   }
   return { created };
+}
+
+function pwaIconSvg(background: string, maskable = false): string {
+  const bg = background || "#0b0d12";
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">`,
+    maskable
+      ? `  <rect width="512" height="512" fill="${bg}"/>`
+      : `  <rect width="512" height="512" rx="96" fill="${bg}"/>`,
+    maskable ? `  <circle cx="256" cy="256" r="224" fill="#11141c"/>` : "",
+    `  <path d="M126 132h260L276 380h-40L126 132Z" fill="#5b7cff"/>`,
+    `  <path d="M204 132h104l-52 126-52-126Z" fill="#e7e9ee"/>`,
+    `  <path d="M168 190h176l-75 166h-26L168 190Z" fill="${bg}" opacity=".45"/>`,
+    `</svg>`,
+    ``,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function pwaManifest(m: Manifest): string {
+  const pwa = m.pwa;
+  const name = pwa?.name ?? m.name;
+  const shortName = pwa?.shortName ?? name.slice(0, 12);
+  return JSON.stringify(
+    {
+      name,
+      short_name: shortName,
+      description: m.description || undefined,
+      start_url: "/",
+      scope: "/",
+      display: pwa?.display ?? "standalone",
+      background_color: pwa?.backgroundColor ?? "#0b0d12",
+      theme_color: pwa?.themeColor ?? "#0b0d12",
+      icons: [
+        {
+          src: "/icon.svg",
+          sizes: "any",
+          type: "image/svg+xml",
+          purpose: "any",
+        },
+        {
+          src: "/maskable-icon.svg",
+          sizes: "any",
+          type: "image/svg+xml",
+          purpose: "maskable",
+        },
+      ],
+    },
+    null,
+    2
+  ) + "\n";
+}
+
+function pwaServiceWorker(m: Manifest): string {
+  const cacheName = `vibe-app-${m.id}-pwa-v1`;
+  return `const CACHE_NAME = ${JSON.stringify(cacheName)};
+const APP_SHELL = ["/", "/manifest.webmanifest", "/icon.svg", "/maskable-icon.svg"];
+const NETWORK_ONLY_PREFIXES = ["/api", "/login", "/logout", "/claim", "/health"];
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
+  self.skipWaiting();
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
+      )
+  );
+  self.clients.claim();
+});
+
+self.addEventListener("fetch", (event) => {
+  const { request } = event;
+  if (request.method !== "GET") return;
+
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+  if (NETWORK_ONLY_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) return;
+
+  if (request.mode === "navigate") {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put("/", copy));
+          return response;
+        })
+        .catch(() => caches.match("/"))
+    );
+    return;
+  }
+
+  event.respondWith(
+    caches.match(request).then((cached) => {
+      if (cached) return cached;
+      return fetch(request).then((response) => {
+        if (!response.ok) return response;
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        return response;
+      });
+    })
+  );
+});
+`;
+}
+
+const PWA_REGISTER_JS = `if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js");
+  });
+}
+`;
+
+function injectIntoHtml(html: string, themeColor: string): { html: string; changed: boolean } {
+  let out = html;
+  let changed = false;
+  const headTags = [
+    `<link rel="manifest" href="/manifest.webmanifest">`,
+    `<link rel="icon" href="/icon.svg" type="image/svg+xml">`,
+    `<meta name="theme-color" content="${themeColor}">`,
+  ];
+  for (const tag of headTags) {
+    if (out.includes(tag)) continue;
+    out = out.replace(/<\/head>/i, `    ${tag}\n  </head>`);
+    changed = true;
+  }
+
+  const registerTag = `<script src="/vibe-pwa-register.js" defer></script>`;
+  if (!out.includes(registerTag)) {
+    out = out.replace(/<\/body>/i, `    ${registerTag}\n  </body>`);
+    changed = true;
+  }
+  return { html: out, changed };
+}
+
+export async function scaffoldPwa(cwd: string, m: Manifest): Promise<PwaScaffoldResult> {
+  const created: string[] = [];
+  const notes: string[] = [];
+  const publicDir = join(cwd, "public");
+  await mkdir(publicDir, { recursive: true });
+
+  const writes: Array<[string, string]> = [
+    [join(publicDir, "manifest.webmanifest"), pwaManifest(m)],
+    [join(publicDir, "sw.js"), pwaServiceWorker(m)],
+    [join(publicDir, "vibe-pwa-register.js"), PWA_REGISTER_JS],
+    [join(publicDir, "icon.svg"), pwaIconSvg(m.pwa?.backgroundColor ?? "#0b0d12")],
+    [join(publicDir, "maskable-icon.svg"), pwaIconSvg(m.pwa?.backgroundColor ?? "#0b0d12", true)],
+  ];
+
+  for (const [p, content] of writes) {
+    await writeFile(p, content, "utf8");
+    created.push(p);
+  }
+
+  const indexPath = join(cwd, "index.html");
+  let registered = false;
+  try {
+    const current = await readFile(indexPath, "utf8");
+    const injected = injectIntoHtml(current, m.pwa?.themeColor ?? "#0b0d12");
+    if (injected.changed) await writeFile(indexPath, injected.html, "utf8");
+    registered = true;
+    if (injected.changed) created.push(indexPath);
+  } catch {
+    notes.push(
+      "No index.html found, so service worker registration was not injected. Add /vibe-pwa-register.js to your HTML entrypoint."
+    );
+  }
+
+  return { created, registered, notes };
 }
 
 function envExample(m: Manifest): string {

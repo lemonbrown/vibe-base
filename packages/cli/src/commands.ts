@@ -11,7 +11,7 @@ import { hasCredentials, saveCredentials } from "./config.js";
 import { detect } from "./detect.js";
 import { hasManifest, loadManifest, saveManifest, slugify } from "./manifest.js";
 import { packProject } from "./pack.js";
-import { scaffold, scaffoldGithub } from "./scaffold.js";
+import { scaffold, scaffoldGithub, scaffoldPwa } from "./scaffold.js";
 
 const execFileAsync = promisify(execFile);
 const cwd = () => process.cwd();
@@ -453,6 +453,38 @@ export async function cmdDoctor(): Promise<void> {
         `email package(s) installed (${emailPkgs.join(", ")}) but capabilities.email is false — ` +
           "set it true so the platform injects EMAIL_* / provider credentials"
       );
+
+    if (m.pwa?.enabled) {
+      const pwaFiles = [
+        "public/manifest.webmanifest",
+        "public/sw.js",
+        "public/vibe-pwa-register.js",
+        "public/icon.svg",
+        "public/maskable-icon.svg",
+      ];
+      const missing: string[] = [];
+      for (const p of pwaFiles) {
+        if (!(await fileExists(join(cwd(), p)))) missing.push(p);
+      }
+      if (missing.length) {
+        issues.push(`PWA enabled but missing ${missing.join(", ")}; run \`vibe pwa enable\``);
+      } else {
+        oks.push("PWA assets present");
+      }
+
+      const indexPath = join(cwd(), "index.html");
+      if (await fileExists(indexPath)) {
+        const html = await readFile(indexPath, "utf8");
+        if (
+          !html.includes("/manifest.webmanifest") ||
+          !html.includes("/vibe-pwa-register.js")
+        ) {
+          issues.push("PWA enabled but index.html is missing manifest or service worker registration");
+        } else {
+          oks.push("PWA registered in index.html");
+        }
+      }
+    }
   } catch (e) {
     issues.push(`manifest invalid: ${(e as Error).message}`);
   }
@@ -469,6 +501,33 @@ export async function cmdDoctor(): Promise<void> {
   for (const o of oks) log(`✓ ${o}`);
   for (const i of issues) log(`⚠ ${i}`);
   log(issues.length ? `\n${issues.length} issue(s) to review.` : "\nAll checks passed.");
+}
+
+/* --------------------------------- pwa -------------------------------- */
+
+export async function cmdPwaEnable(): Promise<void> {
+  const dir = cwd();
+  const manifest = await loadManifest(dir);
+  manifest.pwa = {
+    enabled: true,
+    name: manifest.pwa?.name ?? manifest.name,
+    shortName: manifest.pwa?.shortName ?? manifest.name.slice(0, 12),
+    themeColor: manifest.pwa?.themeColor ?? "#0b0d12",
+    backgroundColor: manifest.pwa?.backgroundColor ?? "#0b0d12",
+    display: manifest.pwa?.display ?? "standalone",
+    cache: { strategy: "static-only" },
+  };
+  await saveManifest(dir, manifest);
+
+  const { created, registered, notes } = await scaffoldPwa(dir, manifest);
+  log("PWA enabled with static-only caching.");
+  log("API/auth routes stay network-only; offline writes are not queued.");
+  if (created.length) {
+    log("\nUpdated:");
+    for (const p of created) log(`  + ${rel(dir, p)}`);
+  }
+  if (registered) log("\nRegistered service worker in index.html.");
+  for (const note of notes) log(`\nNote: ${note}`);
 }
 
 /* ------------------------------- deploy ------------------------------- */
