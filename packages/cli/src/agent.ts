@@ -221,7 +221,9 @@ const ASK_PREAMBLE =
   "Use the read-only `vibe` CLI to gather facts: `vibe platform` for an overview, " +
   "`vibe platform app <id>` for one app, and `vibe query <model> --app <id> -p k=v` " +
   "to read an app's data through its declared read-models (use `vibe query --app <id>` " +
-  "to list them). Do NOT modify any files or deploy. Answer concisely.";
+  "to list them). Do NOT modify any files or deploy. " +
+  "Tool outputs are NOT visible to the user — always write a concise text answer " +
+  "based on what the tools returned.";
 
 function buildPreamble(appId: string): string {
   return (
@@ -269,6 +271,9 @@ const CHAT_PREAMBLE =
   "or modify an existing one. For code changes, make edits, run `vibe ship` to deploy, then `vibe ci` " +
   "to monitor the GitHub Actions build (fix and re-ship if it fails). " +
   "Follow AGENTS.md if present and keep .vibe-memory/ up to date in any app you touch.\n\n" +
+  "IMPORTANT: Tool outputs and thinking are NOT visible to the user — only your text responses are. " +
+  "You MUST always end with a clear text response that directly answers the user's question or " +
+  "summarises what you did. Never complete a turn silently after tool use.\n\n" +
   "When building a NEW app: " +
   "(1) Add an `icon` field to vibe.app.yaml with a self-contained SVG that visually represents the app. " +
   "Use a square viewBox (e.g. viewBox=\"0 0 64 64\"), flat or subtly-gradated colors, no scripts or external refs. " +
