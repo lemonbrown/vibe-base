@@ -227,8 +227,9 @@ const ASK_PREAMBLE =
 
 function buildPreamble(appId: string): string {
   return (
-    `You are building a NEW Vibe Base app with id "${appId}" in this empty directory. ` +
-    `First run \`vibe init --name ${appId}\` to scaffold it, then read AGENTS.md and build ` +
+    `You are building a NEW Vibe Base app with id "${appId}". ` +
+    `Your current working directory is already the dedicated folder for this app — do NOT create a subdirectory inside it. ` +
+    `Run \`vibe init --name ${appId}\` in this current directory to scaffold it, then read AGENTS.md and build ` +
     `the app per the request. Declare \`readModels\` in vibe.app.yaml for any data the user ` +
     `might ask about.\n\n` +
     `Add an \`icon\` field to vibe.app.yaml containing a self-contained SVG that visually ` +
@@ -261,7 +262,7 @@ const CHAT_PREAMBLE =
   "You are a Vibe Base assistant with full access to the workspace. " +
   "Run `vibe apps` to list available apps, `vibe platform` for an overview, " +
   "`vibe platform app <id>` for details on one app, and `vibe query <model> --app <id>` to read data. " +
-  "Determine from the user's message whether to answer a question, build a new app (`vibe init`), " +
+  "Determine from the user's message whether to answer a question, build a new app, " +
   "or modify an existing one. For code changes, make edits, run `vibe test` to deploy to the isolated test environment. If using GitHub-backed deployment, run `vibe ship` and then `vibe ci --env test` " +
   "to monitor the GitHub Actions build. Fix and re-test if deployment or CI fails. After test deployment and verification pass, run `vibe promote` to roll the tested image to production. " +
   "Follow AGENTS.md if present and keep .vibe-memory/ up to date in any app you touch.\n\n" +
@@ -269,10 +270,12 @@ const CHAT_PREAMBLE =
   "You MUST always end with a clear text response that directly answers the user's question or " +
   "summarises what you did. Never complete a turn silently after tool use.\n\n" +
   "When building a NEW app: " +
-  "(1) Add an `icon` field to vibe.app.yaml with a self-contained SVG that visually represents the app. " +
+  "(1) ALWAYS create a dedicated directory for the app first and enter it before running `vibe init` — " +
+  "never run `vibe init` in the workspace root. Example: `mkdir <app-id> && cd <app-id> && vibe init --name <app-id>`. " +
+  "(2) Add an `icon` field to vibe.app.yaml with a self-contained SVG that visually represents the app. " +
   "Use a square viewBox (e.g. viewBox=\"0 0 64 64\"), flat or subtly-gradated colors, no scripts or external refs. " +
   "The icon appears in the portal app grid — make it recognizable at 40×40 px. " +
-  "(2) Run `vibe test` to deploy to the isolated test environment before promoting to production.";
+  "(3) Run `vibe test` to deploy to the isolated test environment before promoting to production.";
 
 function portalUiPreamble(job: AgentJob): string {
   const target = job.targetApp ? `"${job.targetApp}"` : "null";
