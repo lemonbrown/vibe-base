@@ -75,6 +75,12 @@ export async function destroyApp(
   //    declare ON DELETE CASCADE against apps(id).
   await query("DELETE FROM apps WHERE id = $1", [appId]);
 
+  // Queue a local folder cleanup for any daemon that has this app checked out.
+  await query(
+    "INSERT INTO pending_cleanups (app_id) VALUES ($1) ON CONFLICT DO NOTHING",
+    [appId]
+  );
+
   await audit({ actorEmail, action: "app.delete", appId });
 
   // 6. Optionally remove the GitHub repo and its GHCR package. Done after

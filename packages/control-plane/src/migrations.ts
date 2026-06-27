@@ -291,6 +291,17 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE storage_provisions ADD PRIMARY KEY (app_id, environment);
     `,
   },
+  {
+    // Tracks app IDs that need their local workspace folder removed on the
+    // daemon machine after the app is deleted from the platform.
+    id: "0011_pending_cleanups",
+    sql: `
+      CREATE TABLE IF NOT EXISTS pending_cleanups (
+        app_id     TEXT PRIMARY KEY,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `,
+  },
 ];
 
 export async function runMigrations(): Promise<void> {

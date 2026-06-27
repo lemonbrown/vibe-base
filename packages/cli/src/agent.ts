@@ -870,6 +870,23 @@ export async function runDaemon(opts: { name?: string } = {}): Promise<void> {
   });
 
   while (running) {
+    // Drain any pending folder cleanups for deleted apps before claiming a job.
+    try {
+      const { appIds } = await api.pollCleanups();
+      if (appIds.length) {
+        const cfg = await loadAgentConfig();
+        for (const appId of appIds) {
+          const { path: appPath } = resolveAppPath(cfg, appId);
+          try {
+            await rm(appPath, { recursive: true, force: true });
+            log(`  cleanup: removed ${appPath}`);
+          } catch { /* best-effort */ }
+          delete cfg.apps[appId];
+        }
+        await saveAgentConfig(cfg);
+      }
+    } catch { /* best-effort; don't let cleanup errors block job processing */ }
+
     let claimed: AgentJob | undefined;
     try {
       ({ job: claimed } = await api.claimJob(machineId));

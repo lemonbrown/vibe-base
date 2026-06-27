@@ -120,6 +120,17 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true });
   });
 
+  // Atomically claim and return pending local-folder cleanup requests.
+  // Each row is deleted on read so only one daemon instance processes it.
+  app.get("/api/agent/cleanups", async (req, reply) => {
+    const actor = await requireOwner(req, reply);
+    if (!actor) return;
+    const result = await query<{ app_id: string }>(
+      "DELETE FROM pending_cleanups RETURNING app_id"
+    );
+    return reply.send({ appIds: result.rows.map((r) => r.app_id) });
+  });
+
   // Long-poll for the next job. Returns 204 if none appears within the window.
   app.get<{ Querystring: { machine?: string } }>("/api/agent/jobs/claim", async (req, reply) => {
     const actor = await requireOwner(req, reply);

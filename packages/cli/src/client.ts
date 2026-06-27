@@ -160,6 +160,9 @@ export const api = {
   claimJob: (machineId: string) =>
     call<{ job?: AgentJob }>("GET", `/api/agent/jobs/claim?machine=${encodeURIComponent(machineId)}`),
 
+  // Atomically claim pending local-folder cleanup requests for deleted apps.
+  pollCleanups: () => call<{ appIds: string[] }>("GET", "/api/agent/cleanups"),
+
   postJobEvents: (jobId: string, events: JobEvent[]) =>
     call<{ ok: boolean }>("POST", `/api/agent/jobs/${jobId}/events`, { body: { events } }),
 
