@@ -95,7 +95,8 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Archive (soft). Hard delete requires ?confirm=<id> per spec §8.2.
-  app.delete<{ Params: { id: string }; Querystring: { confirm?: string } }>(
+  // Pass ?deleteRepo=true to also delete the linked GitHub repo and GHCR package.
+  app.delete<{ Params: { id: string }; Querystring: { confirm?: string; deleteRepo?: string } }>(
     "/api/apps/:id",
     async (req, reply) => {
       const actor = await requireOwner(req, reply);
@@ -106,7 +107,9 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
       const hardDelete = req.query.confirm === req.params.id;
       if (hardDelete) {
         // Full teardown: container(s), database, storage, routing, records.
-        await destroyApp(req.params.id, actor.email);
+        await destroyApp(req.params.id, actor.email, {
+          deleteGithub: req.query.deleteRepo === "true",
+        });
         return reply.send({ deleted: true });
       }
       await query("UPDATE apps SET status = 'archived', updated_at = now() WHERE id = $1", [

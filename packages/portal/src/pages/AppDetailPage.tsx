@@ -267,25 +267,62 @@ function Logs({ id }: { id: string }) {
 
 /* ------------------------------ danger zone ----------------------------- */
 
-function DangerZone({ id, name }: { id: string; name: string }) {
+function DangerZone({
+  id,
+  name,
+  repo,
+}: {
+  id: string;
+  name: string;
+  repo: { repoFullName: string; htmlUrl: string | null } | null;
+}) {
   const del = useDeleteApp(id);
   const navigate = useNavigate();
   const [confirm, setConfirm] = useState("");
+  const [deleteRepo, setDeleteRepo] = useState(false);
 
   return (
     <Card className="border-[#5a2730]">
       <h2 className="section-title mb-2 text-[var(--color-bad)]">Danger zone</h2>
       <p className="mb-3 text-sm text-[var(--color-muted)]">
         Permanently delete this app — its container, database, storage bucket,
-        routing, and all records. This cannot be undone. Your GitHub repo is left
-        untouched.
+        routing, and all records. This cannot be undone.
       </p>
+      {repo && (
+        <label className="mb-3 flex cursor-pointer items-center gap-2 text-sm text-[var(--color-muted)]">
+          <input
+            type="checkbox"
+            checked={deleteRepo}
+            onChange={(e) => setDeleteRepo(e.target.checked)}
+            className="accent-[var(--color-bad)]"
+          />
+          Also delete the GitHub repository
+          {repo.htmlUrl ? (
+            <>
+              {" "}
+              (
+              <a
+                href={repo.htmlUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="underline hover:text-[var(--color-text)]"
+              >
+                {repo.repoFullName}
+              </a>
+              )
+            </>
+          ) : (
+            <> ({repo.repoFullName})</>
+          )}{" "}
+          and its GHCR package
+        </label>
+      )}
       <form
         className="flex flex-col gap-2 sm:flex-row"
         onSubmit={(e) => {
           e.preventDefault();
           if (confirm !== id) return;
-          del.mutate(undefined, { onSuccess: () => navigate("/") });
+          del.mutate(deleteRepo, { onSuccess: () => navigate("/") });
         }}
       >
         <input
@@ -328,7 +365,7 @@ export function AppDetailPage() {
       <Members id={id} />
       <Deployments id={id} />
       <Logs id={id} />
-      <DangerZone id={id} name={app?.name ?? id} />
+      <DangerZone id={id} name={app?.name ?? id} repo={status?.repo ?? null} />
     </div>
   );
 }

@@ -1,9 +1,10 @@
 import { query } from "../db.js";
 import { audit } from "../lib/audit.js";
-import { getApp } from "../repo.js";
+import { getApp, getAppRepo } from "../repo.js";
 import { removeAppRoute } from "./caddy.js";
 import { deprovisionDatabase } from "./dbProvision.js";
 import { removeContainer, removeImage } from "./docker.js";
+import { deleteGhcrPackage, deleteRepo, githubEnabled } from "./github.js";
 import { closeAppPool } from "./query.js";
 import { deprovisionStorage } from "./storage.js";
 
@@ -15,19 +16,23 @@ import { deprovisionStorage } from "./storage.js";
  *   4. its storage bucket and all objects,
  *   5. all platform records (child tables cascade from `apps`).
  *
+ * Pass `{ deleteGithub: true }` to also delete the linked GitHub repository
+ * and its GHCR container package (best-effort, does not fail the teardown).
+ *
  * The order matters: routing is removed before the containers it points at,
  * and the `apps` row is deleted last so a mid-way failure leaves the app
  * still listed (and retry-able) rather than orphaning live infrastructure.
- *
- * The app's GitHub repository is deliberately left untouched — it belongs to
- * the user, not the platform.
  */
 export async function destroyApp(
   appId: string,
-  actorEmail: string
+  actorEmail: string,
+  opts: { deleteGithub?: boolean } = {}
 ): Promise<void> {
   const app = await getApp(appId);
   if (!app) return;
+
+  // Fetch repo link now — app_repos cascades when the apps row is deleted below.
+  const repo = opts.deleteGithub ? await getAppRepo(appId) : null;
 
   // 1. Stop routing so no request hits a container we're about to remove.
   await removeAppRoute(appId);
@@ -71,4 +76,15 @@ export async function destroyApp(
   await query("DELETE FROM apps WHERE id = $1", [appId]);
 
   await audit({ actorEmail, action: "app.delete", appId });
+
+  // 6. Optionally remove the GitHub repo and its GHCR package. Done after
+  //    platform cleanup so a GitHub API error never leaves orphaned infra.
+  if (repo && githubEnabled()) {
+    try {
+      await deleteGhcrPackage(repo.repo_full_name);
+    } catch { /* best-effort */ }
+    try {
+      await deleteRepo(repo.repo_full_name);
+    } catch { /* best-effort */ }
+  }
 }

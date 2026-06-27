@@ -123,11 +123,12 @@ export const api = {
   // Hard delete: tears down container(s), database, storage, and routing on
   // the VPS, then removes all records. The `confirm` query param (= the app
   // id) is what the control plane requires to distinguish this from archive.
-  deleteApp: (id: string) =>
-    call<{ deleted: boolean }>(
-      "DELETE",
-      `/api/apps/${id}?confirm=${encodeURIComponent(id)}`
-    ),
+  // Pass `deleteRepo: true` to also delete the linked GitHub repo and GHCR package.
+  deleteApp: (id: string, opts: { deleteRepo?: boolean } = {}) => {
+    const params = new URLSearchParams({ confirm: id });
+    if (opts.deleteRepo) params.set("deleteRepo", "true");
+    return call<{ deleted: boolean }>("DELETE", `/api/apps/${id}?${params}`);
+  },
 
   /* ---- platform query layer (what LLMs use to reason about the platform) ---- */
 

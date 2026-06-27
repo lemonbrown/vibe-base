@@ -851,11 +851,20 @@ async function promptMatches(question: string, expected: string): Promise<boolea
 /**
  * Permanently delete the current app from the control plane. This tears down
  * its container, database, storage bucket, and routing on the VPS and removes
- * every platform record — it cannot be undone. The local code and any GitHub
- * repo are left in place.
+ * every platform record — it cannot be undone. The local code is left in place.
+ * Optionally also deletes the linked GitHub repo and GHCR package.
  */
 export async function cmdDelete(opts: { yes?: boolean } = {}): Promise<void> {
   const m = await loadManifest(cwd());
+
+  // Check for a linked GitHub repo so we can offer to delete it.
+  let linkedRepo: { repo: string; htmlUrl: string | null } | null = null;
+  try {
+    const gh = await api.getGithub(m.id);
+    linkedRepo = { repo: gh.repo, htmlUrl: gh.htmlUrl };
+  } catch { /* no repo linked — that's fine */ }
+
+  let deleteRepo = false;
 
   if (!opts.yes) {
     log(
@@ -864,18 +873,31 @@ export async function cmdDelete(opts: { yes?: boolean } = {}): Promise<void> {
         "  • its database (if any) and all data in it\n" +
         "  • its storage bucket and all files\n" +
         "  • its routing and all platform records\n" +
-        "This cannot be undone. Your local code and GitHub repo are untouched.\n"
+        "This cannot be undone. Your local code is left in place.\n"
     );
     const ok = await promptMatches(`Type the app id (${m.id}) to confirm: `, m.id);
     if (!ok) {
       log("Aborted — nothing was deleted.");
       return;
     }
+
+    if (linkedRepo) {
+      const repoLine = linkedRepo.htmlUrl ?? linkedRepo.repo;
+      log(`\nLinked GitHub repo: ${repoLine}`);
+      deleteRepo = await promptMatches(
+        "Also delete the GitHub repo and its GHCR package? (type \"yes\" to confirm): ",
+        "yes"
+      );
+      if (!deleteRepo) log("GitHub repo will be left untouched.");
+    }
   }
 
-  log(`Deleting ${m.id}…`);
-  await api.deleteApp(m.id);
-  log(`\n✓ Deleted ${m.id}. Removed its container, database, storage, and routing.`);
+  log(`\nDeleting ${m.id}…`);
+  await api.deleteApp(m.id, { deleteRepo });
+
+  let msg = `\n✓ Deleted ${m.id}. Removed its container, database, storage, and routing.`;
+  if (deleteRepo && linkedRepo) msg += `\n  GitHub repo and GHCR package for ${linkedRepo.repo} deleted.`;
+  log(msg);
 }
 
 /* -------------------------------- agent ------------------------------- */

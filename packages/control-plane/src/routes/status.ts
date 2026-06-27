@@ -7,6 +7,7 @@ import {
   appSummary,
   deploymentToContract,
   getApp,
+  getAppRepo,
   recentDeployments,
 } from "../repo.js";
 import { requireOwner } from "./guards.js";
@@ -24,11 +25,14 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
 
     const m = row.manifest;
     const environment = normalizeEnv(req.query.env);
-    const memberCount = await query<{ n: string }>(
-      "SELECT count(*)::text AS n FROM app_members WHERE app_id = $1 AND status = 'active'",
-      [row.id]
-    );
-    const deps = await recentDeployments(row.id, environment, 5);
+    const [memberCount, deps, appRepo] = await Promise.all([
+      query<{ n: string }>(
+        "SELECT count(*)::text AS n FROM app_members WHERE app_id = $1 AND status = 'active'",
+        [row.id]
+      ),
+      recentDeployments(row.id, environment, 5),
+      getAppRepo(row.id),
+    ]);
 
     const status: AppStatus = {
       app: await appSummary(row, environment),
@@ -48,6 +52,13 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
       },
       members: Number(memberCount.rows[0]?.n ?? "0"),
       recentDeployments: deps.map(deploymentToContract),
+      repo: appRepo
+        ? {
+            repoFullName: appRepo.repo_full_name,
+            defaultBranch: appRepo.default_branch,
+            htmlUrl: appRepo.html_url,
+          }
+        : null,
     };
     return reply.send({ status });
   });

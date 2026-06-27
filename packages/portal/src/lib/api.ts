@@ -110,9 +110,9 @@ export const api = {
       method: "POST",
     }),
 
-  deleteApp: (id: string) =>
+  deleteApp: (id: string, deleteRepo = false) =>
     http<{ deleted: boolean }>(
-      `/api/apps/${id}?confirm=${encodeURIComponent(id)}`,
+      `/api/apps/${id}?confirm=${encodeURIComponent(id)}${deleteRepo ? "&deleteRepo=true" : ""}`,
       { method: "DELETE" }
     ),
 

@@ -191,3 +191,22 @@ export async function setDeploymentStatus(
     description: opts.description,
   });
 }
+
+/** Delete a GitHub repository. */
+export async function deleteRepo(repoFullName: string): Promise<void> {
+  await gh("DELETE", `/repos/${repoFullName}`);
+}
+
+/**
+ * Delete the GHCR container package for a repo. The package name is the
+ * last segment of the repo full name (e.g. "my-app" for "owner/my-app").
+ */
+export async function deleteGhcrPackage(repoFullName: string): Promise<void> {
+  const { github } = loadConfig();
+  const packageName = repoFullName.split("/").pop()!;
+  const path =
+    github.ownerIsOrg && github.owner
+      ? `/orgs/${github.owner}/packages/container/${encodeURIComponent(packageName)}`
+      : `/user/packages/container/${encodeURIComponent(packageName)}`;
+  await gh("DELETE", path);
+}

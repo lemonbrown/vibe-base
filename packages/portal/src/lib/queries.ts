@@ -140,7 +140,7 @@ export function useRevokePortalMember() {
 export function useDeleteApp(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.deleteApp(id),
+    mutationFn: (deleteRepo: boolean) => api.deleteApp(id, deleteRepo),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["apps"] }),
   });
 }

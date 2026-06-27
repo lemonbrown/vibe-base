@@ -84,6 +84,13 @@ export const AppStatusSchema = z.object({
   }),
   members: z.number(),
   recentDeployments: z.array(DeploymentSchema),
+  repo: z
+    .object({
+      repoFullName: z.string(),
+      defaultBranch: z.string(),
+      htmlUrl: z.string().nullable(),
+    })
+    .nullable(),
 });
 export type AppStatus = z.infer<typeof AppStatusSchema>;
 
